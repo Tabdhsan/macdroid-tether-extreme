@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>macdroid-tether-extreme — How It Works</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+<style>
+  :root {
+    --ground:      #eceef1;
+    --surface:     #f7f8fa;
+    --surface-2:   #e4e7ec;
+    --hairline:    #d2d7de;
+    --ink:         #17202b;
+    --ink-soft:    #45515f;
+    --ink-faint:   #6c7887;
+    --signal:      #b9791a;   /* amber — carrier / primary accent */
+    --signal-bg:   #f6ead2;
+    --flow:        #12796e;   /* teal — data flowing / success */
+    --flow-bg:     #d6ece8;
+    --fault:       #c23b31;   /* red — blocked / failure */
+    --fault-bg:    #f6dcd9;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:    #0f1720;
+      --surface:   #16202c;
+      --surface-2: #1e2a38;
+      --hairline:  #2a3947;
+      --ink:       #e6ebf1;
+      --ink-soft:  #a7b4c2;
+      --ink-faint: #6f8091;
+      --signal:    #e6a038;
+      --signal-bg: #2a2416;
+      --flow:      #3fc0b0;
+      --flow-bg:   #12292a;
+      --fault:     #e8675c;
+      --fault-bg:  #2c1a1a;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground:#eceef1; --surface:#f7f8fa; --surface-2:#e4e7ec; --hairline:#d2d7de;
+    --ink:#17202b; --ink-soft:#45515f; --ink-faint:#6c7887;
+    --signal:#b9791a; --signal-bg:#f6ead2; --flow:#12796e; --flow-bg:#d6ece8;
+    --fault:#c23b31; --fault-bg:#f6dcd9;
+  }
+  :root[data-theme="dark"] {
+    --ground:#0f1720; --surface:#16202c; --surface-2:#1e2a38; --hairline:#2a3947;
+    --ink:#e6ebf1; --ink-soft:#a7b4c2; --ink-faint:#6f8091;
+    --signal:#e6a038; --signal-bg:#2a2416; --flow:#3fc0b0; --flow-bg:#12292a;
+    --fault:#e8675c; --fault-bg:#2c1a1a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- type ---- */
+  h1, h2, h3 { text-wrap: balance; line-height: 1.15; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin: 0;
+  }
+  p { color: var(--ink-soft); }
+  p a { color: var(--ink); text-decoration-color: var(--signal); text-underline-offset: 3px; }
+  strong { color: var(--ink); font-weight: 650; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--surface-2);
+    padding: 0.1em 0.38em;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  /* ---- hero ---- */
+  .hero {
+    border-bottom: 1px solid var(--hairline);
+    padding: clamp(56px, 11vw, 104px) 0 52px;
+  }
+  .hero h1 {
+    font-family: var(--mono);
+    font-weight: 680;
+    font-size: clamp(2.1rem, 6.4vw, 3.5rem);
+    letter-spacing: -0.02em;
+    margin: 18px 0 0;
+  }
+  .hero h1 .dim { color: var(--ink-faint); }
+  .hero .lede {
+    font-size: clamp(1.05rem, 2.4vw, 1.28rem);
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: 22px 0 0;
+  }
+  .hero .lede b { color: var(--ink); font-weight: 600; }
+
+  /* ---- readout tiles ---- */
+  .readout {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    margin-top: 40px;
+    background: var(--hairline);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .tile { background: var(--surface); padding: 20px 18px; }
+  .tile .num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 680;
+    font-size: clamp(1.4rem, 4.2vw, 2rem);
+    color: var(--signal);
+    letter-spacing: -0.01em;
+  }
+  .tile.flow .num { color: var(--flow); }
+  .tile .lab {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-top: 6px;
+  }
+  @media (max-width: 560px) {
+    .readout { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ---- sections ---- */
+  section { padding: 52px 0; border-bottom: 1px solid var(--hairline); }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+  .offset {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--signal);
+    letter-spacing: 0.08em;
+    flex: none;
+    padding-top: 4px;
+  }
+  section h2 {
+    font-family: var(--mono);
+    font-weight: 640;
+    font-size: clamp(1.3rem, 3.4vw, 1.7rem);
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  section h3 {
+    font-size: 1.02rem;
+    font-weight: 640;
+    margin: 30px 0 4px;
+    color: var(--ink);
+  }
+  .body { max-width: 66ch; }
+  .body p { margin: 14px 0; }
+
+  /* ---- signal-flow stack diagram ---- */
+  .stack {
+    margin: 30px 0 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+  }
+  .node {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--hairline);
+    font-size: 0.92rem;
+  }
+  .node:last-child { border-bottom: 0; }
+  .node .role {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    width: 96px;
+    flex: none;
+  }
+  .node .what { color: var(--ink); font-weight: 550; }
+  .node .what small { display: block; color: var(--ink-faint); font-weight: 400; font-size: 0.82em; margin-top: 2px; }
+  .node.ours { background: var(--signal-bg); }
+  .node.ours .role { color: var(--signal); }
+  .node .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--hairline); flex: none;
+  }
+  .node.ours .dot { background: var(--signal); }
+  .pulse {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--flow);
+    opacity: 0;
+    animation: travel 3.4s linear infinite;
+  }
+  .node:nth-child(1) .pulse { animation-delay: 0s; }
+  .node:nth-child(2) .pulse { animation-delay: 0.28s; }
+  .node:nth-child(3) .pulse { animation-delay: 0.56s; }
+  .node:nth-child(4) .pulse { animation-delay: 0.84s; }
+  .node:nth-child(5) .pulse { animation-delay: 1.12s; }
+  .node:nth-child(6) .pulse { animation-delay: 1.40s; }
+  @keyframes travel {
+    0%, 8% { opacity: 0; }
+    9%, 15% { opacity: 1; }
+    22%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse { display: none; }
+  }
+  .cap {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--ink-faint);
+    margin-top: 12px;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---- packet byte diagram ---- */
+  .packet { margin: 26px 0 4px; overflow-x: auto; }
+  .packet-row { display: flex; min-width: 480px; border-radius: 8px; overflow: hidden; border: 1px solid var(--hairline); }
+  .field {
+    padding: 10px 12px;
+    border-right: 1px solid var(--hairline);
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    text-align: center;
+  }
+  .field:last-child { border-right: 0; }
+  .field .fname { color: var(--ink); font-weight: 600; }
+  .field .fbytes { color: var(--ink-faint); font-size: 0.9em; margin-top: 3px; letter-spacing: 0.05em; }
+  .field.hdr { background: var(--signal-bg); }
+  .field.hdr .fname { color: var(--signal); }
+  .field.pay { background: var(--flow-bg); flex: 1; }
+  .field.pay .fname { color: var(--flow); }
+
+  /* ---- fault cards (the four walls) ---- */
+  .fault {
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--fault);
+    border-radius: 10px;
+    background: var(--surface);
+    padding: 20px 22px;
+    margin: 18px 0;
+  }
+  .fault .sym {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--fault);
+    margin: 0 0 8px;
+  }
+  .fault h3 { margin: 0 0 6px; font-size: 1.06rem; }
+  .fault p { margin: 8px 0; font-size: 0.94rem; }
+  .fault .fix {
+    display: flex; gap: 10px; align-items: baseline;
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px dashed var(--hairline);
+    font-size: 0.92rem;
+  }
+  .fault .fix .k {
+    font-family: var(--mono);
+    font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--flow); flex: none; padding-top: 3px; width: 34px;
+  }
+  .fault .fix .v { color: var(--ink); }
+
+  /* ---- terminal / code block ---- */
+  .term {
+    background: #0c1219;
+    border: 1px solid #1f2b38;
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 20px 0;
+  }
+  .term pre { margin: 0; font-family: var(--mono); font-size: 0.82rem; line-height: 1.7; color: #c6d2de; }
+  .term .cmd { color: #e6a038; }
+  .term .ok  { color: #3fc0b0; }
+  .term .dim { color: #5f7285; }
+  .term .out { color: #9fb0c0; }
+
+  /* ---- callout ---- */
+  .note {
+    background: var(--signal-bg);
+    border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 22px 0;
+  }
+  .note p { margin: 0; color: var(--ink); font-size: 0.94rem; }
+  .note .tag {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--signal); display: block; margin-bottom: 6px;
+  }
+
+  ul.clean { list-style: none; padding: 0; margin: 16px 0; max-width: 66ch; }
+  ul.clean li {
+    position: relative; padding-left: 24px; margin: 10px 0; color: var(--ink-soft);
+  }
+  ul.clean li::before {
+    content: "▸"; position: absolute; left: 4px; color: var(--signal);
+    font-size: 0.9em; top: 1px;
+  }
+  ul.clean li b { color: var(--ink); }
+
+  footer { padding: 44px 0 72px; }
+  footer p { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-faint); letter-spacing: 0.02em; }
+
+  .divlabel {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 34px 0 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">Systems / USB Networking / Apple Silicon</p>
+    <h1>macdroid&#8209;tether&#8209;<span class="dim">extreme</span></h1>
+    <p class="lede">A <b>1,112-line userspace driver</b> that revives Android USB tethering on a modern Mac — no kernel extension, no SIP changes, no App Store app. It replaces HoRNDIS, the kernel extension that solved this for years and has been dead since 2018.</p>
+
+    <div class="readout" role="group" aria-label="Final measured results">
+      <div class="tile flow">
+        <div class="num">260<span style="font-size:0.6em"> Mbps</span></div>
+        <div class="lab">Throughput</div>
+      </div>
+      <div class="tile flow">
+        <div class="num">16<span style="font-size:0.6em"> ms</span></div>
+        <div class="lab">Latency</div>
+      </div>
+      <div class="tile">
+        <div class="num">0</div>
+        <div class="lab">Kernel exts</div>
+      </div>
+      <div class="tile">
+        <div class="num">4</div>
+        <div class="lab">Walls hit</div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x01</span>
+        <h2>The problem</h2>
+      </div>
+      <div class="body">
+        <p>Tethering an Android phone to a computer over USB — faster than a Wi-Fi hotspot, less battery drain, one cable — is a non-event on Windows or Linux. On a Mac it quietly doesn't work, and the reason is a protocol mismatch.</p>
+        <p>When an Android phone toggles on "USB tethering," it presents itself to the computer as an <strong>RNDIS</strong> device — Microsoft's <em>Remote NDIS</em>, a way of tunneling Ethernet frames over USB. Windows and Linux ship an RNDIS host driver. <strong>macOS never has.</strong> Apple supports the standards-based cousins (CDC-ECM and CDC-NCM) and it supports <em>iPhone</em> tethering, but plug in an Android phone speaking RNDIS and the Mac sees a device it has no idea how to talk to. It appears in Network settings as <code>SAMSUNG_Android — Not connected</code> and just sits there.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x02</span>
+        <h2>The dead incumbent</h2>
+      </div>
+      <div class="body">
+        <p>For years the fix was <strong>HoRNDIS</strong> — a kernel extension that added the missing RNDIS host driver to macOS. It's genuinely gone: last release <strong>2018</strong>, and it fails on any current Mac for two independent reasons.</p>
+        <ul class="clean">
+          <li><b>Wrong CPU.</b> It was only ever built for Intel <code>x86_64</code>. On Apple Silicon it can't even load — the binary is the wrong architecture for the M-series chip.</li>
+          <li><b>Wrong era.</b> Apple has been dismantling third-party kernel extensions since 2019. On Apple Silicon they require reduced security and reboots, and recent macOS releases removed several of the low-level networking hooks HoRNDIS depends on outright.</li>
+        </ul>
+        <p>Reviving it as a kext is a dead end. But the insight that made this project possible: HoRNDIS ran in the <em>kernel</em> because that's how you wrote drivers in 2012. The actual work it does — speak RNDIS, hand packets to the network stack — doesn't <em>need</em> the kernel at all. It can live entirely in userspace.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x03</span>
+        <h2>The detour that didn't pan out</h2>
+      </div>
+      <div class="body">
+        <p>Before writing code we tried the free lunch: modern Android can present the standards-based <strong>NCM</strong> protocol that macOS <em>does</em> understand. One ADB command — <code>svc usb setFunctions ncm</code> — and the Mac instantly saw a native network interface (<code>en8</code>). It genuinely worked, for a moment.</p>
+        <p>Then Samsung's firmware slammed the door. Every time the USB-tethering toggle is flipped, One UI <strong>force-resets the USB function back to RNDIS</strong>, killing the NCM interface. We confirmed it in the tethering service's own state: <code>mUsbTetheringFunction: RNDIS</code>, hardcoded, ignoring the system setting we changed. Worse, poking at the USB functions this way left a <em>zombie</em> network interface on the phone that came back to bite us later. NCM was out. Time to build.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x04</span>
+        <h2>What we built</h2>
+      </div>
+      <div class="body">
+        <p>A single C program that does everything HoRNDIS did, in userspace, using two ordinary building blocks: <strong>libusb</strong> to talk to the phone, and a <strong>utun</strong> device to hand packets to macOS. Nothing else. It compiles to a 54&#8202;KB binary.</p>
+      </div>
+
+      <div class="stack" aria-label="Data path from Mac applications down to the 5G network">
+        <div class="node"><span class="pulse"></span><span class="dot"></span><span class="role">Layer 7</span><span class="what">Your apps<small>Safari, Slack — plain internet traffic</small></span></div>
+        <div class="node"><span class="pulse"></span><span class="dot"></span><span class="role">Kernel</span><span class="what">utun10 interface<small>macOS routes traffic to it like any network device</small></span></div>
+        <div class="node ours"><span class="pulse"></span><span class="dot"></span><span class="role">Our code</span><span class="what">macdroid-tether-extreme<small>wraps/unwraps packets · runs DHCP · answers ARP</small></span></div>
+        <div class="node ours"><span class="pulse"></span><span class="dot"></span><span class="role">Our code</span><span class="what">libusb<small>bulk transfers to the phone, entirely in userspace</small></span></div>
+        <div class="node"><span class="pulse"></span><span class="dot"></span><span class="role">USB</span><span class="what">RNDIS gadget<small>the phone's tethering endpoint (rndis0)</small></span></div>
+        <div class="node"><span class="pulse"></span><span class="dot"></span><span class="role">Radio</span><span class="what">5G modem<small>the actual uplink</small></span></div>
+      </div>
+      <p class="cap">// a packet's round trip — the two amber layers are ours</p>
+
+      <h3>How it actually moves a packet</h3>
+      <p class="body" style="margin-top:6px">The bridge opens the phone's two USB interfaces — a <strong>control channel</strong> and a <strong>data channel</strong> — and runs the RNDIS handshake: initialize, ask the phone for its MAC address, set a packet filter to start the flow. Then two threads pump traffic. Outbound, it reads an IP packet from <code>utun</code>, wraps it in an Ethernet frame and then an RNDIS header, and writes it to the phone's bulk USB endpoint. Inbound, it does the reverse. It also runs a tiny <strong>DHCP client</strong> to get an IP from the phone and answers <strong>ARP</strong> so the phone knows where to send replies.</p>
+
+      <div class="packet" aria-label="RNDIS data packet layout">
+        <div class="packet-row">
+          <div class="field hdr"><div class="fname">RNDIS header</div><div class="fbytes">44 bytes</div></div>
+          <div class="field hdr"><div class="fname">Ethernet</div><div class="fbytes">14 bytes</div></div>
+          <div class="field pay"><div class="fname">your IP packet</div><div class="fbytes">payload</div></div>
+        </div>
+      </div>
+      <p class="cap">// every frame the bridge sends over USB — strip the first 58 bytes and it's ordinary internet traffic</p>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x05</span>
+        <h2>The four walls</h2>
+      </div>
+      <div class="body">
+        <p>The control plane worked almost immediately — the handshake succeeded on the first try. Getting <em>data</em> to flow took four separate diagnoses, each with a symptom that looked nothing like its cause. This is the actual debugging story.</p>
+      </div>
+
+      <div class="fault">
+        <p class="sym">Wall 1 · silence on the wire</p>
+        <h3>The kernel was holding the door</h3>
+        <p>Control messages worked, but every bulk read timed out — zero bytes, forever. macOS had quietly attached its own CDC driver to the phone's interfaces and was consuming all the incoming data before we could.</p>
+        <div class="fix"><span class="k">Fix</span><span class="v">Explicitly detach the kernel driver from both USB interfaces before claiming them, and re-attach on exit so macOS recovers cleanly.</span></div>
+      </div>
+
+      <div class="fault">
+        <p class="sym">Wall 2 · NO-CARRIER</p>
+        <h3>Android was serving a ghost</h3>
+        <p>The phone reported the tethering link as <code>NO-CARRIER</code> even though our handshake was perfect. The culprit was that zombie interface from the NCM detour: Android was running DHCP and routing on a dead <code>usb0</code> left over from earlier, while the <em>live</em> USB connection was a brand-new <code>rndis0</code> that was administratively down. It was answering the door of an empty house.</p>
+        <div class="fix"><span class="k">Fix</span><span class="v">Reboot the phone to clear the stale interface, then enable tethering only through the Settings UI — never by poking USB functions over ADB again.</span></div>
+      </div>
+
+      <div class="fault">
+        <p class="sym">Wall 3 · 1.5 Mbps ceiling</p>
+        <h3>We were reading one packet, throwing away five</h3>
+        <p>Data finally flowed — but crawled. Android bundles <strong>multiple RNDIS packets into a single USB transfer</strong> for efficiency. Our receive code extracted only the first packet in each transfer and discarded the rest. Every dropped packet triggered a TCP retransmit; throughput collapsed to a trickle.</p>
+        <div class="fix"><span class="k">Fix</span><span class="v">Rewrite the receive path to walk every concatenated packet in a transfer, carrying leftover bytes across reads.</span></div>
+      </div>
+
+      <div class="fault">
+        <p class="sym">Wall 4 · 7 KB/s black hole</p>
+        <h3>The VPN shrank the envelope</h3>
+        <p>Turning on a VPN on the phone made it <em>worse</em> — 7 KB/s. Classic MTU black hole: the VPN wraps every packet in extra headers, shrinking the real usable packet size, but the bridge was still advertising a full 1500-byte MTU. Small handshake packets fit; large data packets were silently dropped with nowhere to fragment.</p>
+        <div class="fix"><span class="k">Fix</span><span class="v">Lower the interface MTU to 1400 (a new <code>--mtu</code> flag) so packets fit inside the VPN's envelope. Throughput jumped ~37,000×.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x06</span>
+        <h2>Where it landed</h2>
+      </div>
+      <div class="body">
+        <p>Full 5G speed through a driver we wrote from scratch, running entirely in userspace on Apple Silicon. Verified end-to-end: TCP, TLS, and DNS all resolve over the bridge with Wi-Fi off.</p>
+      </div>
+      <div class="term" aria-label="Terminal session showing the bridge running">
+<pre><span class="dim"># the whole thing — one command</span>
+<span class="cmd">sudo</span> ./macdroid-tether-extreme --default-route --mtu 1400
+<span class="out">[2] RNDIS handshake...</span>
+<span class="out">  MAC: 6e:f9:04:25:2d:61</span>
+<span class="ok">  media status: CONNECTED</span>
+<span class="out">[3] DHCP...</span>
+<span class="ok">  DHCP ACK: ip=10.13.177.30  gw=10.13.177.151</span>
+<span class="out">[4] Setting up network interface...</span>
+<span class="ok">  Opened utun10  ·  mtu 1400  ·  default route installed</span>
+<span class="out">[5] Packet pump running.</span>
+
+<span class="dim"># measured through the bridge, Wi-Fi off</span>
+<span class="ok">25 MB in 0.77s  →  32,575,751 B/s  (~260 Mbps)</span>
+<span class="ok">ping 1.1.1.1  →  16 ms avg</span></pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x07</span>
+        <h2>Using it</h2>
+      </div>
+      <div class="body">
+        <p>The routine, start to finish:</p>
+        <ul class="clean">
+          <li>Plug in the phone and enable <b>USB tethering</b> from Settings (this leaves it in RNDIS mode — exactly what we want).</li>
+          <li>Run <code>sudo ./macdroid-tether-extreme --default-route</code>. Add <code>--mtu 1400</code> if a VPN is running on the phone.</li>
+          <li>Turn off Wi-Fi. All traffic now flows over USB. The terminal window <b>is</b> the driver — keep it open.</li>
+          <li>Press <b>Ctrl+C</b> when done. It restores your previous default route and DNS and cleans up the interface.</li>
+        </ul>
+        <div class="note">
+          <span class="tag">One rule</span>
+          <p>Never switch USB functions with <code>svc usb setFunctions</code> to force NCM — that's what created the zombie interface behind Wall 2. Use the Settings toggle, full stop.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x08</span>
+        <h2>A note on carrier detection</h2>
+      </div>
+      <div class="body">
+        <p>How can a carrier even tell traffic is tethered? Three main signals — and understanding them explains why a VPN on the phone changes the picture:</p>
+        <ul class="clean">
+          <li><b>TTL / hop count.</b> Every IP packet has a counter that drops by one at each router. Traffic born on the phone leaves at the OS default; tethered traffic passes <em>through</em> the phone first, so it arrives one lower. Seeing that off-by-one is the classic tell.</li>
+          <li><b>OS fingerprinting.</b> A Mac's TCP options, TLS handshake, and user-agent strings look nothing like a phone's. Desktop signatures on a phone line stand out.</li>
+          <li><b>Endpoints &amp; volume.</b> Hits to desktop-only services, or simply blowing past a hotspot data bucket, flag the session.</li>
+        </ul>
+        <p>A VPN running <em>on the phone</em> hides the first two — everything becomes uniform, phone-originated, encrypted packets to a single endpoint. The catch is the overhead it adds, which is precisely what the <code>--mtu 1400</code> fix accommodates. The two interact, which is why the order they're debugged in matters.</p>
+      </div>
+    </section>
+
+    <p class="divlabel">Build &amp; footprint</p>
+    <div class="body">
+      <ul class="clean">
+        <li><b>macdroid_tether_extreme.c</b> — 1,112 lines of C · one file · no dependencies beyond libusb</li>
+        <li><b>Compiles</b> with <code>make</code> (clang) to a 54 KB binary</li>
+        <li><b>Runs</b> on Apple Silicon, no SIP changes, no kernel extension, no reboot</li>
+        <li><b>License</b> — MIT · contributions welcome</li>
+      </ul>
+    </div>
+
+  </main>
+
+  <footer>
+    <p>macdroid-tether-extreme · a userspace RNDIS host driver for macOS · 2026</p>
+  </footer>
+
+</div>
+</body>
+</html>

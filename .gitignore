@@ -1,0 +1,8 @@
+# build artifacts
+macdroid-tether-extreme
+probe
+*.o
+*.dSYM/
+
+# macOS
+.DS_Store
