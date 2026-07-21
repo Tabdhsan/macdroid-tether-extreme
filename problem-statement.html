@@ -340,20 +340,20 @@
   <header class="hero">
     <p class="eyebrow">Systems / USB Networking / Apple Silicon</p>
     <h1>macdroid&#8209;tether&#8209;<span class="dim">extreme</span></h1>
-    <p class="lede">A <b>1,112-line userspace driver</b> that revives Android USB tethering on a modern Mac — no kernel extension, no SIP changes, no App Store app. It replaces HoRNDIS, the kernel extension that solved this for years and has been dead since 2018.</p>
+    <p class="lede">A <b>~1,180-line userspace driver</b> that revives Android USB tethering on a modern Mac — no kernel extension, no SIP changes, no App Store app. It replaces HoRNDIS, the kernel extension that solved this for years and has been dead since 2018.</p>
 
-    <div class="readout" role="group" aria-label="Final measured results">
+    <div class="readout" role="group" aria-label="Project facts">
       <div class="tile flow">
-        <div class="num">260<span style="font-size:0.6em"> Mbps</span></div>
-        <div class="lab">Throughput</div>
+        <div class="num">~1,180</div>
+        <div class="lab">Lines of C</div>
       </div>
       <div class="tile flow">
-        <div class="num">16<span style="font-size:0.6em"> ms</span></div>
-        <div class="lab">Latency</div>
-      </div>
-      <div class="tile">
         <div class="num">0</div>
         <div class="lab">Kernel exts</div>
+      </div>
+      <div class="tile">
+        <div class="num">1</div>
+        <div class="lab">USB cable</div>
       </div>
       <div class="tile">
         <div class="num">4</div>
@@ -477,7 +477,7 @@
         <h2>Where it landed</h2>
       </div>
       <div class="body">
-        <p>Full 5G speed through a driver we wrote from scratch, running entirely in userspace on Apple Silicon. Verified end-to-end: TCP, TLS, and DNS all resolve over the bridge with Wi-Fi off.</p>
+        <p>A driver written from scratch, running entirely in userspace on Apple Silicon, carries real traffic: the RNDIS handshake, DHCP, and a live packet pump all work, and TCP, TLS, and DNS resolve over the bridge with Wi-Fi off.</p>
       </div>
       <div class="term" aria-label="Terminal session showing the bridge running">
 <pre><span class="dim"># the whole thing — one command</span>
@@ -489,18 +489,40 @@
 <span class="ok">  DHCP ACK: ip=10.13.177.30  gw=10.13.177.151</span>
 <span class="out">[4] Setting up network interface...</span>
 <span class="ok">  Opened utun10  ·  mtu 1400  ·  default route installed</span>
-<span class="out">[5] Packet pump running.</span>
-
-<span class="dim"># measured through the bridge, Wi-Fi off</span>
-<span class="ok">25 MB in 0.77s  →  32,575,751 B/s  (~260 Mbps)</span>
-<span class="ok">ping 1.1.1.1  →  16 ms avg</span></pre>
+<span class="out">[5] Packet pump running.</span></pre>
+      </div>
+      <div class="body">
+        <p class="cap" style="margin-top:16px">// throughput figures are intentionally omitted here — see the next section for why a single number would mislead.</p>
       </div>
     </section>
 
     <section>
       <div class="sec-head">
         <span class="offset">0x07</span>
-        <h2>Using it</h2>
+        <h2>The twist: the carrier, not the code</h2>
+      </div>
+      <div class="body">
+        <p>Getting the bridge to move packets was the engineering problem. The <em>speed</em> turned out to be a different problem entirely — and not one the code can solve.</p>
+        <p>Early throughput readings looked spectacular, but they were an artifact: the phone was quietly using nearby Wi-Fi as its own upstream, so the "tether" was really riding a home network. Measured properly, in isolation, over cellular, a clear pattern emerged. On one test plan whose high-speed hotspot allowance had been used up, throughput through the tether was pinned to the same rate <em>to the byte</em> across every configuration — VPN on the phone, VPN off, TTL adjusted — while the phone's <em>own</em> apps stayed fast over the identical 5G.</p>
+        <p>That signature — an identical, unmovable rate regardless of anything done to the packets — is a <strong>hard rate limiter in the carrier's core network</strong>, applied to tethered data. It isn't inspecting packets, so the usual evasions don't touch it: a VPN <em>on the phone</em> doesn't even tunnel a tethered computer's traffic (Android only routes the phone's own apps through it), and a TTL tweak changes nothing against a cap that isn't TTL-based. This is carrier policy, not a limitation of the bridge. Your own numbers depend entirely on your device, carrier, plan, and signal.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x08</span>
+        <h2>The path that isn't tethering</h2>
+      </div>
+      <div class="body">
+        <p>If the cap is on <em>tethered</em> data, the way around it is to not tether. Run an HTTP proxy as an ordinary app <em>on the phone</em>, and pipe a laptop to it over the USB cable with <code>adb</code>. The proxy app opens its own connections, so its requests travel the phone's normal <strong>on-device</strong> data path — the same path the phone's browser uses.</p>
+        <p>The repo ships this as <code>tether.sh</code> (<code>source ./tether.sh on|off|status</code>): it sets up the <code>adb</code> forward, points the system proxy (browser) and <code>HTTPS_PROXY</code> (command-line tools) at the local port, bypasses localhost and Tailscale, and reverts cleanly. It covers proxy-aware apps — browsers, dev tools — rather than every packet, which for a lot of workflows is exactly enough. It's shared for educational purposes; use it with your own devices and within your carrier's and network's terms of service.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x09</span>
+        <h2>Using the tether</h2>
       </div>
       <div class="body">
         <p>The routine, start to finish:</p>
@@ -519,24 +541,24 @@
 
     <section>
       <div class="sec-head">
-        <span class="offset">0x08</span>
-        <h2>A note on carrier detection</h2>
+        <span class="offset">0x0A</span>
+        <h2>Detection — and why it didn't matter here</h2>
       </div>
       <div class="body">
-        <p>How can a carrier even tell traffic is tethered? Three main signals — and understanding them explains why a VPN on the phone changes the picture:</p>
+        <p>Carriers do have ways to tell tethered traffic apart from a phone's own, and they're worth knowing:</p>
         <ul class="clean">
-          <li><b>TTL / hop count.</b> Every IP packet has a counter that drops by one at each router. Traffic born on the phone leaves at the OS default; tethered traffic passes <em>through</em> the phone first, so it arrives one lower. Seeing that off-by-one is the classic tell.</li>
-          <li><b>OS fingerprinting.</b> A Mac's TCP options, TLS handshake, and user-agent strings look nothing like a phone's. Desktop signatures on a phone line stand out.</li>
-          <li><b>Endpoints &amp; volume.</b> Hits to desktop-only services, or simply blowing past a hotspot data bucket, flag the session.</li>
+          <li><b>TTL / hop count.</b> Every IP packet has a counter that drops by one at each router. Traffic born on the phone leaves at the OS default; tethered traffic passes <em>through</em> the phone first, so it arrives one lower. That off-by-one is the classic tell.</li>
+          <li><b>OS fingerprinting.</b> A laptop's TCP options, TLS handshake, and user-agent strings look nothing like a phone's. Desktop signatures on a phone line stand out.</li>
+          <li><b>Endpoints &amp; volume.</b> Hits to desktop-only services, or simply passing a hotspot data allowance, flag the session.</li>
         </ul>
-        <p>A VPN running <em>on the phone</em> hides the first two — everything becomes uniform, phone-originated, encrypted packets to a single endpoint. The catch is the overhead it adds, which is precisely what the <code>--mtu 1400</code> fix accommodates. The two interact, which is why the order they're debugged in matters.</p>
+        <p>But the twist section is the real lesson: the cap encountered in testing wasn't detection at all. It was a flat rate limiter on the tethering bearer — identical to the byte no matter what the packets looked like. Evasion tricks (TTL edits, a phone-side VPN) all assume the carrier is <em>inspecting</em> traffic; when it's simply metering a bearer, there's nothing to inspect and nothing to evade. That's exactly why the on-device proxy path — which never touches the tethering bearer — is the approach that holds up.</p>
       </div>
     </section>
 
     <p class="divlabel">Build &amp; footprint</p>
     <div class="body">
       <ul class="clean">
-        <li><b>macdroid_tether_extreme.c</b> — 1,112 lines of C · one file · no dependencies beyond libusb</li>
+        <li><b>macdroid_tether_extreme.c</b> — ~1,180 lines of C · one file · no dependencies beyond libusb</li>
         <li><b>Compiles</b> with <code>make</code> (clang) to a 54 KB binary</li>
         <li><b>Runs</b> on Apple Silicon, no SIP changes, no kernel extension, no reboot</li>
         <li><b>License</b> — MIT · contributions welcome</li>

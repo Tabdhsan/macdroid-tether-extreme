@@ -82,7 +82,9 @@ Without root, the tool runs in probe mode automatically (handshake + DHCP, no in
 
 ## Measured
 
-The userspace bridge itself moves traffic at full link speed — verified end-to-end (TCP / TLS / DNS) on a Galaxy Z Flip over 5G. Actual internet throughput depends on your plan: in testing, once a plan's high-speed hotspot allowance was used up, *tethered* throughput was capped (~0.6 Mbps) while the phone's *on-device* data stayed fast (~44 Mbps over the same 5G) — the two are metered differently. The proxy method below reaches the full on-device number.
+The userspace bridge moves traffic end-to-end (TCP / TLS / DNS) — verified on a Galaxy Z Flip. **Actual throughput depends entirely on your own device, carrier, plan, and signal; any numbers here are one-off observations on one setup, not what you should expect.**
+
+The point worth taking away isn't a speed figure — it's that many plans meter *tethered/hotspot* data separately from *on-device* data. In one observation on a plan whose high-speed hotspot allowance was used up, tethered throughput sat far below the phone's own on-device speed over the same 5G, and no client-side change moved it. That's a carrier policy, not a property of this tool. The proxy method below uses the on-device path instead.
 
 ## Alternative: on-device proxy over USB (`tether.sh`)
 
