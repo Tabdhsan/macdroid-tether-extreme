@@ -2,11 +2,13 @@
 
 **Android USB tethering on modern macOS — in userspace. No kernel extension, no SIP changes, no App Store app.**
 
-Plug an Android phone into a Mac, turn on USB tethering, run one command, and get a native network connection over the cable at full speed. Works on Apple Silicon.
+Plug an Android phone into a Mac, turn on USB tethering, run one command, and get a native network connection over the cable. Works on Apple Silicon.
 
 ```
 sudo ./macdroid-tether-extreme --default-route
 ```
+
+> **Educational and research use.** This project documents how USB networking, the RNDIS protocol, and on-device data paths work on macOS. Use it with your own devices and in accordance with the terms of service of your carrier and network.
 
 ---
 
@@ -76,11 +78,23 @@ Without root, the tool runs in probe mode automatically (handshake + DHCP, no in
 
 - **Don't use `adb shell svc usb setFunctions` to force NCM.** It creates a zombie network interface on the phone; Android then serves DHCP on the dead interface while the live one stays down, and no data flows. Enable tethering through the Settings UI only. If you've already done it and hit `NO-CARRIER`, reboot the phone.
 - **Keep the terminal open while tethering** — the process *is* the driver. Closing it drops the connection (cleanly).
-- **Carrier hotspot limits still apply.** This is normal NAT tethering; carriers can detect and meter it (TTL, OS fingerprinting). A VPN on the phone mitigates detection — pair it with `--mtu 1400`.
+- **Carrier tethering policy applies.** This is IP-level NAT tethering, so the traffic is metered as tethered/hotspot data. Worth knowing from testing: an on-*phone* VPN does **not** tunnel a tethered computer's traffic (Android only routes the phone's own apps through it), and a TTL adjustment alone did not move a hard, network-enforced cap. If your plan meters tethered data separately from on-device data, the proxy method below rides the on-device path instead.
 
 ## Measured
 
-On a Galaxy Z Flip over 5G: **~260 Mbps** down, **~16 ms** latency, verified end-to-end (TCP/TLS/DNS) with Wi-Fi off.
+The userspace bridge itself moves traffic at full link speed — verified end-to-end (TCP / TLS / DNS) on a Galaxy Z Flip over 5G. Actual internet throughput depends on your plan: in testing, once a plan's high-speed hotspot allowance was used up, *tethered* throughput was capped (~0.6 Mbps) while the phone's *on-device* data stayed fast (~44 Mbps over the same 5G) — the two are metered differently. The proxy method below reaches the full on-device number.
+
+## Alternative: on-device proxy over USB (`tether.sh`)
+
+The tether above forwards packets at the IP layer, so its traffic is metered as tethered data. A different approach routes **proxy-aware apps** (browser, Claude Code, `git`, `curl`, …) through an HTTP proxy running *as an app on the phone*, piped over the USB cable with `adb` — no tethering interface at all. Because the proxy app makes its own connections, requests use the phone's normal on-device data path.
+
+Setup:
+
+1. **Phone:** install [Every Proxy](https://play.google.com/store/apps/details?id=com.emanuelef.everyproxy) (free, no root) and toggle its **HTTP** proxy on (port `8080`).
+2. **Mac:** `source ./tether.sh on` — sets up the `adb` forward, points the macOS system proxy (browser) and shell `HTTPS_PROXY` (CLI tools) at `127.0.0.1:8080`, and bypasses localhost + Tailscale (`100.64.0.0/10`, `*.ts.net`).
+3. `source ./tether.sh off` — reverts all of it (system proxy off, env vars unset, forward removed). `source ./tether.sh status` shows current state.
+
+`tether.sh` must be **sourced** (not executed) so it can set/clear the proxy variables in your shell. It only enables the proxy after confirming the phone app is actually listening, so it never leaves you pointed at a dead proxy. Covers proxy-aware apps; a SOCKS setup or transparent-proxy shim would be needed to route *every* app.
 
 ## License
 
