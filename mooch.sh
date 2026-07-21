@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# tether.sh — route this Mac through the phone's UNLIMITED on-device 5G via an
-# on-phone HTTP proxy (Every Proxy) piped over the USB cable with adb.
+# mooch.sh — route this Mac through the phone's on-device 5G via an on-phone
+# HTTP proxy (Every Proxy) piped over the USB cable with adb.
 #
 # This is NOT tethering — the phone's proxy app fetches on-device, so the
-# carrier's hotspot/tethering speed cap never applies.
+# carrier's hotspot/tethering speed cap never applies. The Mac "mooches" the
+# phone's own data path over the cable.
 #
-#   source ./tether.sh on       turn everything ON  (adb pipe + browser + shell)
-#   source ./tether.sh off      turn everything OFF (full revert)
-#   source ./tether.sh status   show current state
+#   source ./mooch.sh on       turn everything ON  (adb pipe + browser + shell)
+#   source ./mooch.sh off      turn everything OFF (full revert)
+#   source ./mooch.sh status   show current state
 #
 # It must be SOURCED (not executed) so it can set/clear the proxy env vars in
 # YOUR shell for Claude Code. The system-proxy (browser) parts work either way.
 #
 # What "on" changes, and what "off" reverts — nothing persists past `off`:
-#   • adb forward tcp:8080  (Mac localhost:8080 -> phone:8080)
-#   • macOS Web + Secure Web proxy on your active service -> 127.0.0.1:8080
+#   • adb forward tcp:8899  (Mac localhost:8899 -> phone:8080)
+#   • macOS Web + Secure Web proxy on your active service -> 127.0.0.1:8899
 #   • HTTP(S)_PROXY / ALL_PROXY / NO_PROXY exported in this shell
 # Tailscale (100.64.0.0/10, *.ts.net) and localhost are always bypassed.
 
 _TTHR_HOST=127.0.0.1
-_TTHR_PORT=8080          # Mac-side local port
+_TTHR_PORT=8899          # Mac-side local port (kept off 8080 to avoid dev servers)
 _TTHR_PHONE_PORT=8080    # port Every Proxy's HTTP proxy listens on
 _TTHR_NOPROXY="localhost,127.0.0.1,::1,100.64.0.0/10,*.ts.net"
 
@@ -47,6 +48,14 @@ _tthr_on() {
   if [ "$(adb get-state 2>/dev/null)" != "device" ]; then
     echo "✗ no phone on adb — plug in USB + enable USB debugging"; return 1
   fi
+  # 1b) local port free? (a dev server on this port would silently break the pipe)
+  local holder
+  holder=$(lsof -nP -iTCP:$_TTHR_PORT -sTCP:LISTEN 2>/dev/null | awk 'NR>1 && $1!="adb"{print $1; exit}')
+  if [ -n "$holder" ]; then
+    echo "✗ local port $_TTHR_PORT is already in use by '$holder' — the USB pipe can't bind cleanly."
+    echo "  Change _TTHR_PORT at the top of mooch.sh to a free port, then retry."
+    return 1
+  fi
   # 2) USB pipe
   adb forward tcp:$_TTHR_PORT tcp:$_TTHR_PHONE_PORT >/dev/null || { echo "✗ adb forward failed"; return 1; }
   # 3) is the phone proxy actually listening? (don't set a dead proxy)
@@ -72,7 +81,7 @@ _tthr_on() {
     export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" all_proxy="$ALL_PROXY"
     export NO_PROXY="$_TTHR_NOPROXY" no_proxy="$_TTHR_NOPROXY"
   fi
-  echo "✓ tether ON  (service: $svc)  — browser + Claude Code now ride on-device 5G"
+  echo "✓ mooch ON  (service: $svc)  — browser + Claude Code now ride on-device 5G"
   _tthr_sourced || echo "  note: run with 'source' to also set HTTPS_PROXY for Claude Code in this shell"
 }
 
@@ -84,7 +93,7 @@ _tthr_off() {
   if _tthr_sourced; then
     unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy
   fi
-  echo "✓ tether OFF (service: $svc)  — back to normal Wi-Fi, all proxy settings cleared"
+  echo "✓ mooch OFF (service: $svc)  — back to normal Wi-Fi, all proxy settings cleared"
 }
 
 _tthr_status() {
@@ -98,9 +107,23 @@ _tthr_status() {
   [ "$code" = "200" ] && echo "yes (proxy up)" || echo "no (proxy down / off)"
 }
 
+# --- launch a Chrome that proxies through the phone, Wi-Fi or not -------------
+# Uses a dedicated profile + the --proxy-server flag so it works even with
+# Wi-Fi off (unlike the macOS system proxy, which dies with the Wi-Fi service).
+_tthr_browser() {
+  local url="${2:-https://1.1.1.1/cdn-cgi/trace}"
+  open -na "Google Chrome" --args \
+    --proxy-server="http://$_TTHR_HOST:$_TTHR_PORT" \
+    --user-data-dir="$HOME/.mooch-chrome" \
+    "$url" 2>/dev/null \
+    && echo "✓ opened a proxied Chrome window (via $_TTHR_HOST:$_TTHR_PORT) — survives Wi-Fi off" \
+    || echo "✗ couldn't launch Chrome"
+}
+
 case "${1:-status}" in
-  on)     _tthr_on ;;
-  off)    _tthr_off ;;
-  status) _tthr_status ;;
-  *)      echo "usage: source ./tether.sh on|off|status" ;;
+  on)      _tthr_on ;;
+  off)     _tthr_off ;;
+  status)  _tthr_status ;;
+  browser) _tthr_browser "$@" ;;
+  *)       echo "usage: source ./mooch.sh on|off|status|browser [url]" ;;
 esac

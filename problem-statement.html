@@ -492,37 +492,14 @@
 <span class="out">[5] Packet pump running.</span></pre>
       </div>
       <div class="body">
-        <p class="cap" style="margin-top:16px">// throughput figures are intentionally omitted here — see the next section for why a single number would mislead.</p>
+        <p class="cap" style="margin-top:16px">// throughput figures are intentionally omitted here — see "The twist" below for why a single number would mislead.</p>
       </div>
     </section>
 
     <section>
       <div class="sec-head">
         <span class="offset">0x07</span>
-        <h2>The twist: the carrier, not the code</h2>
-      </div>
-      <div class="body">
-        <p>Getting the bridge to move packets was the engineering problem. The <em>speed</em> turned out to be a different problem entirely — and not one the code can solve.</p>
-        <p>Early throughput readings looked spectacular, but they were an artifact: the phone was quietly using nearby Wi-Fi as its own upstream, so the "tether" was really riding a home network. Measured properly, in isolation, over cellular, a clear pattern emerged. On one test plan whose high-speed hotspot allowance had been used up, throughput through the tether was pinned to the same rate <em>to the byte</em> across every configuration — VPN on the phone, VPN off, TTL adjusted — while the phone's <em>own</em> apps stayed fast over the identical 5G.</p>
-        <p>That signature — an identical, unmovable rate regardless of anything done to the packets — is a <strong>hard rate limiter in the carrier's core network</strong>, applied to tethered data. It isn't inspecting packets, so the usual evasions don't touch it: a VPN <em>on the phone</em> doesn't even tunnel a tethered computer's traffic (Android only routes the phone's own apps through it), and a TTL tweak changes nothing against a cap that isn't TTL-based. This is carrier policy, not a limitation of the bridge. Your own numbers depend entirely on your device, carrier, plan, and signal.</p>
-      </div>
-    </section>
-
-    <section>
-      <div class="sec-head">
-        <span class="offset">0x08</span>
-        <h2>The path that isn't tethering</h2>
-      </div>
-      <div class="body">
-        <p>If the cap is on <em>tethered</em> data, the way around it is to not tether. Run an HTTP proxy as an ordinary app <em>on the phone</em>, and pipe a laptop to it over the USB cable with <code>adb</code>. The proxy app opens its own connections, so its requests travel the phone's normal <strong>on-device</strong> data path — the same path the phone's browser uses.</p>
-        <p>The repo ships this as <code>tether.sh</code> (<code>source ./tether.sh on|off|status</code>): it sets up the <code>adb</code> forward, points the system proxy (browser) and <code>HTTPS_PROXY</code> (command-line tools) at the local port, bypasses localhost and Tailscale, and reverts cleanly. It covers proxy-aware apps — browsers, dev tools — rather than every packet, which for a lot of workflows is exactly enough. It's shared for educational purposes; use it with your own devices and within your carrier's and network's terms of service.</p>
-      </div>
-    </section>
-
-    <section>
-      <div class="sec-head">
-        <span class="offset">0x09</span>
-        <h2>Using the tether</h2>
+        <h2>Using the driver</h2>
       </div>
       <div class="body">
         <p>The routine, start to finish:</p>
@@ -541,7 +518,19 @@
 
     <section>
       <div class="sec-head">
-        <span class="offset">0x0A</span>
+        <span class="offset">0x08</span>
+        <h2>The twist: the carrier, not the code</h2>
+      </div>
+      <div class="body">
+        <p>Getting the bridge to move packets was the engineering problem. The <em>speed</em> turned out to be a different problem entirely — and not one the code can solve.</p>
+        <p>Early throughput readings looked spectacular, but they were an artifact: the phone was quietly using nearby Wi-Fi as its own upstream, so the "tether" was really riding a home network. Measured properly, in isolation, over cellular, a clear pattern emerged. On one test plan whose high-speed hotspot allowance had been used up, throughput through the tether was pinned to the same rate <em>to the byte</em> across every configuration — VPN on the phone, VPN off, TTL adjusted — while the phone's <em>own</em> apps stayed fast over the identical 5G.</p>
+        <p>That signature — an identical, unmovable rate regardless of anything done to the packets — is a <strong>hard rate limiter in the carrier's core network</strong>, applied to tethered data. It isn't inspecting packets, so the usual evasions don't touch it: a VPN <em>on the phone</em> doesn't even tunnel a tethered computer's traffic (Android only routes the phone's own apps through it), and a TTL tweak changes nothing against a cap that isn't TTL-based. This is carrier policy, not a limitation of the bridge. Your own numbers depend entirely on your device, carrier, plan, and signal.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x09</span>
         <h2>Detection — and why it didn't matter here</h2>
       </div>
       <div class="body">
@@ -552,6 +541,24 @@
           <li><b>Endpoints &amp; volume.</b> Hits to desktop-only services, or simply passing a hotspot data allowance, flag the session.</li>
         </ul>
         <p>But the twist section is the real lesson: the cap encountered in testing wasn't detection at all. It was a flat rate limiter on the tethering bearer — identical to the byte no matter what the packets looked like. Evasion tricks (TTL edits, a phone-side VPN) all assume the carrier is <em>inspecting</em> traffic; when it's simply metering a bearer, there's nothing to inspect and nothing to evade. That's exactly why the on-device proxy path — which never touches the tethering bearer — is the approach that holds up.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head">
+        <span class="offset">0x0A</span>
+        <h2>The path that isn't tethering</h2>
+      </div>
+      <div class="body">
+        <p>If the cap is on <em>tethered</em> data, the way around it is to not tether. Run an HTTP proxy as an ordinary app <em>on the phone</em>, and pipe a laptop to it over the USB cable with <code>adb</code>. The proxy app opens its own connections, so its requests travel the phone's normal <strong>on-device</strong> data path — the same path the phone's browser uses.</p>
+        <p>The repo ships this as <code>mooch.sh</code>: it sets up the <code>adb</code> forward, points the system proxy (browser) and <code>HTTPS_PROXY</code> (command-line tools) at the local port, bypasses localhost and Tailscale, and reverts cleanly. It covers proxy-aware apps — browsers, dev tools — rather than every packet, which for a lot of workflows is exactly enough.</p>
+        <p class="cap" style="margin-top:6px">// how to run</p>
+        <ul class="clean">
+          <li><b>On the phone —</b> install <a href="https://play.google.com/store/apps/details?id=com.emanuelef.everyproxy">Every Proxy</a>, toggle its <b>HTTP</b> proxy <b>ON</b> (port 8080), and enable USB debugging.</li>
+          <li><b>On the Mac —</b> <code>source ./mooch.sh on</code>. It must be <em>sourced</em> (not executed) so it can set <code>HTTPS_PROXY</code> in your shell for command-line tools. It only flips the proxy on <em>after</em> confirming the phone app is answering, so it never leaves you pointed at a dead proxy.</li>
+          <li><b>Optional —</b> turn Wi-Fi off; proxy-aware apps keep working over the phone. <code>source ./mooch.sh off</code> reverts everything, and <code>status</code> shows the current state.</li>
+        </ul>
+        <p>It's shared for educational purposes; use it with your own devices and within your carrier's and network's terms of service.</p>
       </div>
     </section>
 

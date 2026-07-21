@@ -86,17 +86,28 @@ The userspace bridge moves traffic end-to-end (TCP / TLS / DNS) — verified on 
 
 The point worth taking away isn't a speed figure — it's that many plans meter *tethered/hotspot* data separately from *on-device* data. In one observation on a plan whose high-speed hotspot allowance was used up, tethered throughput sat far below the phone's own on-device speed over the same 5G, and no client-side change moved it. That's a carrier policy, not a property of this tool. The proxy method below uses the on-device path instead.
 
-## Alternative: on-device proxy over USB (`tether.sh`)
+## Alternative: on-device proxy over USB (`mooch.sh`)
 
-The tether above forwards packets at the IP layer, so its traffic is metered as tethered data. A different approach routes **proxy-aware apps** (browser, Claude Code, `git`, `curl`, …) through an HTTP proxy running *as an app on the phone*, piped over the USB cable with `adb` — no tethering interface at all. Because the proxy app makes its own connections, requests use the phone's normal on-device data path.
+The tether above forwards packets at the IP layer, so its traffic is metered as tethered data. A different approach routes **proxy-aware apps** (browser, Claude Code, `git`, `curl`, …) through an HTTP proxy running *as an app on the phone*, piped over the USB cable with `adb` — no tethering interface at all. Because the proxy app makes its own connections, requests travel the phone's normal on-device data path.
 
-Setup:
+### How to run
 
-1. **Phone:** install [Every Proxy](https://play.google.com/store/apps/details?id=com.emanuelef.everyproxy) (free, no root) and toggle its **HTTP** proxy on (port `8080`).
-2. **Mac:** `source ./tether.sh on` — sets up the `adb` forward, points the macOS system proxy (browser) and shell `HTTPS_PROXY` (CLI tools) at `127.0.0.1:8080`, and bypasses localhost + Tailscale (`100.64.0.0/10`, `*.ts.net`).
-3. `source ./tether.sh off` — reverts all of it (system proxy off, env vars unset, forward removed). `source ./tether.sh status` shows current state.
+1. **Phone — install the proxy app.** Install [Every Proxy](https://play.google.com/store/apps/details?id=com.emanuelef.everyproxy) (free, no root).
+2. **Phone — turn the proxy on.** Open Every Proxy and toggle the **HTTP** proxy **ON** (port `8080`). Leave it running.
+3. **Phone — enable USB debugging** (Settings → Developer options), plug into the Mac, and confirm `adb devices` lists it.
+4. **Mac — start mooching** (must be **sourced**):
+   ```sh
+   source ./mooch.sh on
+   ```
+   This sets up the `adb` forward (Mac `127.0.0.1:8899` → phone `8080`), verifies the phone proxy is actually answering, points the macOS system proxy (browser) and this shell's `HTTPS_PROXY` (CLI tools) at `127.0.0.1:8899`, and bypasses localhost + Tailscale (`100.64.0.0/10`, `*.ts.net`).
+5. **Optional — go Wi-Fi-free.** Turn off the Mac's Wi-Fi and proxy-aware apps keep working over the phone. Run `source ./mooch.sh on` in each new shell whose CLI tools (e.g. `claude`) you want on the phone.
+6. **Mac — stop:**
+   ```sh
+   source ./mooch.sh off
+   ```
+   Reverts everything — system proxy off, env vars unset, `adb` forward removed. `source ./mooch.sh status` shows the current state at any time.
 
-`tether.sh` must be **sourced** (not executed) so it can set/clear the proxy variables in your shell. It only enables the proxy after confirming the phone app is actually listening, so it never leaves you pointed at a dead proxy. Covers proxy-aware apps; a SOCKS setup or transparent-proxy shim would be needed to route *every* app.
+`mooch.sh` must be **sourced** (not executed) so it can set/clear the proxy variables in your shell. It only enables the proxy after confirming the phone app is actually listening, so it never leaves you pointed at a dead proxy. It covers proxy-aware apps; a SOCKS setup or transparent-proxy shim would be needed to route *every* app.
 
 ## License
 
