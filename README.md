@@ -88,26 +88,40 @@ The point worth taking away isn't a speed figure — it's that many plans meter 
 
 ## Alternative: on-device proxy over USB (`mooch.sh`)
 
-The tether above forwards packets at the IP layer, so its traffic is metered as tethered data. A different approach routes **proxy-aware apps** (browser, Claude Code, `git`, `curl`, …) through an HTTP proxy running *as an app on the phone*, piped over the USB cable with `adb` — no tethering interface at all. Because the proxy app makes its own connections, requests travel the phone's normal on-device data path.
+The tether above forwards packets at the IP layer, so its traffic is metered as tethered data. A different approach pipes traffic through a proxy app running *on the phone*, over the USB cable with `adb` — no tethering interface at all. Because the proxy app makes its own connections, requests travel the phone's normal on-device data path.
+
+With **SOCKS5** enabled, the macOS system SOCKS proxy routes **all apps** (Telegram, Slack, Spotify, etc.) through the phone — not just browsers and CLI tools. HTTP-only mode still works but is limited to proxy-aware apps.
 
 ### How to run
 
 1. **Phone — install the proxy app.** Install [Every Proxy](https://play.google.com/store/apps/details?id=com.emanuelef.everyproxy) (free, no root).
-2. **Phone — turn the proxy on.** Open Every Proxy and toggle the **HTTP** proxy **ON** (port `8080`). Leave it running.
+2. **Phone — turn on SOCKS5** (and optionally HTTP). In Every Proxy, enable the **SOCKS5** proxy (default port `1080`). You can also enable **HTTP** (port `8080`) for CLI tools, but SOCKS5 alone is enough.
 3. **Phone — enable USB debugging** (Settings → Developer options), plug into the Mac, and confirm `adb devices` lists it.
 4. **Mac — start mooching** (must be **sourced**):
    ```sh
    source ./mooch.sh on
    ```
-   This sets up the `adb` forward (Mac `127.0.0.1:8899` → phone `8080`), verifies the phone proxy is actually answering, points the macOS system proxy (browser) and this shell's `HTTPS_PROXY` (CLI tools) at `127.0.0.1:8899`, and bypasses localhost + Tailscale (`100.64.0.0/10`, `*.ts.net`).
-5. **Optional — go Wi-Fi-free.** Turn off the Mac's Wi-Fi and proxy-aware apps keep working over the phone. Run `source ./mooch.sh on` in each new shell whose CLI tools (e.g. `claude`) you want on the phone.
-6. **Mac — stop:**
+   This sets up `adb` forwards over USB, probes which proxies are live, sets the macOS system SOCKS proxy (so Telegram etc. work), and exports shell env vars for CLI tools. At least one proxy (HTTP or SOCKS5) must be running on the phone.
+5. **Mac — stop:**
    ```sh
    source ./mooch.sh off
    ```
-   Reverts everything — system proxy off, env vars unset, `adb` forward removed. `source ./mooch.sh status` shows the current state at any time.
+   Reverts everything — system proxy off, env vars unset, `adb` forwards removed. `source ./mooch.sh status` shows the current state at any time.
 
-`mooch.sh` must be **sourced** (not executed) so it can set/clear the proxy variables in your shell. It only enables the proxy after confirming the phone app is actually listening, so it never leaves you pointed at a dead proxy. It covers proxy-aware apps; a SOCKS setup or transparent-proxy shim would be needed to route *every* app.
+### Wi-Fi on or off?
+
+Keep Wi-Fi **on** (but you don't need to be connected to a network). The macOS system SOCKS proxy is tied to the active network service — turning Wi-Fi off disables that service and apps like Telegram lose their proxy route. The USB pipe itself works fine either way; it's just the system proxy setting that needs the service active.
+
+### Ports
+
+| Proxy | Phone port | Mac localhost port |
+|---|---|---|
+| SOCKS5 | `1080` | `8900` |
+| HTTP | `8080` | `8899` |
+
+If Every Proxy uses different ports, edit `_TTHR_PHONE_SOCKS_PORT` / `_TTHR_PHONE_PORT` at the top of `mooch.sh`.
+
+`mooch.sh` must be **sourced** (not executed) so it can set/clear the proxy variables in your shell. Run `source ./mooch.sh on` in each new terminal whose CLI tools (e.g. `claude`) you want on the phone.
 
 ## License
 
