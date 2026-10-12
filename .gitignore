@@ -1,8 +1,6 @@
-# build artifacts
-macdroid-tether-extreme
-probe
-*.o
-*.dSYM/
+# downloaded sing-box binaries + built helper (recreated by ./uplink.sh setup)
+bin/
+uplink/dnshold
 
 # macOS
 .DS_Store

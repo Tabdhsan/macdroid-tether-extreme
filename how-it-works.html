@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone Uplink</title>
+<meta name="description" content="How uplink.sh gives a Mac the phone's own mobile data over USB, without hotspot or tethering.">
+<style>
+  :root {
+    --ground: #eef0f3; --surface: #f8f9fb; --surface-2: #e6e9ee; --hairline: #d3d8e0;
+    --ink: #16202b; --ink-soft: #46525f; --ink-faint: #6b7784;
+    --amber: #b9791a; --amber-bg: #f6ead2;   /* the phone */
+    --teal: #12796e;  --teal-bg: #d9ece9;    /* works / flowing */
+    --red: #c23b31;   --red-bg: #f6dcd9;     /* broken / avoided */
+    --blue: #2f63b8;  --blue-bg: #dde7f6;    /* the Mac */
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0f1720; --surface:#16202c; --surface-2:#1e2a38; --hairline:#2a3947;
+      --ink:#e6ebf1; --ink-soft:#a7b4c2; --ink-faint:#7d8d9e;
+      --amber:#e6a038; --amber-bg:#2a2416; --teal:#3fc0b0; --teal-bg:#12292a;
+      --red:#e8675c; --red-bg:#2c1a1a; --blue:#7aa7ef; --blue-bg:#18243a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0f1720; --surface:#16202c; --surface-2:#1e2a38; --hairline:#2a3947;
+    --ink:#e6ebf1; --ink-soft:#a7b4c2; --ink-faint:#7d8d9e;
+    --amber:#e6a038; --amber-bg:#2a2416; --teal:#3fc0b0; --teal-bg:#12292a;
+    --red:#e8675c; --red-bg:#2c1a1a; --blue:#7aa7ef; --blue-bg:#18243a;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans);
+         line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 44px 16px 72px; }
+  .eyebrow { font-family: var(--mono); font-size: .7rem; letter-spacing: .2em; text-transform: uppercase;
+             color: var(--amber); margin: 0; overflow-wrap: anywhere; }
+  h1 { font-family: var(--mono); font-size: clamp(1.6rem, 4.6vw, 2.35rem); letter-spacing: -.01em;
+       margin: 12px 0 0; text-wrap: balance; }
+  .lede { font-size: clamp(1rem, 2.2vw, 1.12rem); color: var(--ink-soft); max-width: 62ch; margin: 14px 0 0; }
+  .lede b { color: var(--ink); }
+  section { margin-top: 48px; }
+  h2 { font-family: var(--mono); font-size: 1.12rem; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; }
+  h2 .n { font-size: .7rem; color: var(--amber); border: 1px solid var(--amber); border-radius: 6px; padding: 2px 7px; }
+  .sub { color: var(--ink-faint); font-size: .92rem; margin: 0 0 16px; }
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 20px; }
+  p { margin: 0 0 12px; } p:last-child { margin-bottom: 0; }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
+
+  /* path diagram */
+  .diagram .svgwrap { overflow-x: auto; }
+  .diagram svg { width: 100%; min-width: 640px; height: auto; display: block; }   /* scrolls on phones instead of shrinking to unreadable */
+  .diagram text { font-family: var(--sans); fill: var(--ink); }
+  .diagram .mono { font-family: var(--mono); }
+  .diagram .faint { fill: var(--ink-faint); }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: .82rem; color: var(--ink-soft); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 760px) { .grid3 { grid-template-columns: 1fr; } }
+  .tile h3 { font-size: .98rem; margin: 0 0 8px; }
+  .tile .tag { font-family: var(--mono); font-size: .64rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+               padding: 3px 8px; border-radius: 999px; display: inline-block; margin-bottom: 10px; }
+  .tag.teal { color: var(--teal); background: var(--teal-bg); }
+  .tag.amber { color: var(--amber); background: var(--amber-bg); }
+  .tag.blue { color: var(--blue); background: var(--blue-bg); }
+  .tile p { font-size: .92rem; color: var(--ink-soft); }
+
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { font-family: var(--mono); font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); }
+  tr:last-child td { border-bottom: 0; }
+  .ok { color: var(--teal); font-weight: 600; }
+  .bad { color: var(--red); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+
+  .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .timeline li { display: grid; grid-template-columns: 28px 1fr; gap: 14px; }
+  .dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-family: var(--mono);
+         font-size: .8rem; font-weight: 700; }
+  .dot.bad { background: var(--red-bg); color: var(--red); }
+  .dot.ok { background: var(--teal-bg); color: var(--teal); }
+  .timeline b { display: block; }
+  .timeline span { color: var(--ink-soft); font-size: .92rem; }
+
+  .cmd { font-family: var(--mono); font-size: .85rem; background: #0e1620; color: #e6ebf1; padding: 14px 16px;
+         border-radius: 10px; overflow-x: auto; white-space: pre; margin: 0; }
+  .cmd .c { color: #7f8b99; }
+  footer { margin-top: 56px; color: var(--ink-faint); font-family: var(--mono); font-size: .75rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">macdroid-tether-extreme · uplink.sh</p>
+  <h1>The phone's own data, on your Mac, over a cable</h1>
+  <p class="lede">Every app on the Mac uses the phone's <b>mobile data</b> through the USB cable. Hotspot and USB tethering aren't involved, so it isn't counted as hotspot. TCP and UDP both work, and it cleans up after itself even if something crashes.</p>
+
+  <section>
+    <h2><span class="n">01</span>The path</h2>
+    <p class="sub">One cable. Two copies of sing-box, one on each end. Everything leaves through the phone's own connection.</p>
+    <div class="card diagram">
+      <div class="svgwrap"><svg viewBox="0 0 860 250" role="img" aria-labelledby="dtitle">
+        <title id="dtitle">Mac apps go into utun225, through sing-box on the Mac, over adb and the USB cable to sing-box on the phone, then out through the phone's mobile data</title>
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--teal)"/>
+          </marker>
+        </defs>
+        <!-- Mac zone -->
+        <rect x="8" y="22" width="430" height="206" rx="14" fill="var(--blue-bg)" stroke="var(--blue)" stroke-opacity=".35"/>
+        <text x="24" y="46" class="mono" font-size="12" fill="var(--blue)" style="fill:var(--blue)">MAC</text>
+        <!-- Phone zone -->
+        <rect x="560" y="22" width="292" height="206" rx="14" fill="var(--amber-bg)" stroke="var(--amber)" stroke-opacity=".4"/>
+        <text x="576" y="46" class="mono" font-size="12" style="fill:var(--amber)">PHONE · no root</text>
+
+        <!-- boxes -->
+        <g font-size="13">
+          <rect x="26" y="70" width="112" height="64" rx="10" fill="var(--surface)" stroke="var(--hairline)"/>
+          <text x="82" y="97" text-anchor="middle" font-weight="600">Every app</text>
+          <text x="82" y="116" text-anchor="middle" class="faint" font-size="11">Chrome · Slack · ssh</text>
+
+          <rect x="168" y="70" width="112" height="64" rx="10" fill="var(--surface)" stroke="var(--hairline)"/>
+          <text x="224" y="97" text-anchor="middle" font-weight="600">utun225</text>
+          <text x="224" y="116" text-anchor="middle" class="faint" font-size="11">routes + DNS</text>
+
+          <rect x="310" y="70" width="112" height="64" rx="10" fill="var(--surface)" stroke="var(--hairline)"/>
+          <text x="366" y="97" text-anchor="middle" font-weight="600">sing-box</text>
+          <text x="366" y="116" text-anchor="middle" class="faint" font-size="11">UDP → inside TCP</text>
+
+          <rect x="580" y="70" width="120" height="64" rx="10" fill="var(--surface)" stroke="var(--hairline)"/>
+          <text x="640" y="97" text-anchor="middle" font-weight="600">sing-box</text>
+          <text x="640" y="116" text-anchor="middle" class="faint" font-size="11">via adb shell</text>
+
+          <rect x="724" y="70" width="112" height="64" rx="10" fill="var(--surface)" stroke="var(--amber)"/>
+          <text x="780" y="97" text-anchor="middle" font-weight="600">Mobile data</text>
+          <text x="780" y="116" text-anchor="middle" class="faint" font-size="11">rmnet_data0</text>
+        </g>
+
+        <!-- arrows -->
+        <g stroke="var(--teal)" stroke-width="2" fill="none" marker-end="url(#arr)">
+          <line x1="138" y1="102" x2="164" y2="102"/>
+          <line x1="280" y1="102" x2="306" y2="102"/>
+          <line x1="422" y1="102" x2="576" y2="102"/>
+          <line x1="700" y1="102" x2="720" y2="102"/>
+        </g>
+        <!-- cable label -->
+        <text x="499" y="88" text-anchor="middle" class="mono" font-size="11" style="fill:var(--teal)">USB cable</text>
+        <text x="499" y="124" text-anchor="middle" class="faint" font-size="11">adb forward · TCP</text>
+
+        <!-- annotations -->
+        <g font-size="12" class="faint">
+          <text x="26" y="168" style="fill:var(--ink-soft)">LAN + tailnet stay direct</text>
+          <text x="26" y="188" style="fill:var(--ink-faint)">DNS: public → DoH 1.1.1.1 via phone</text>
+          <text x="26" y="208" style="fill:var(--ink-faint)">      *.ts.net → 100.100.100.100</text>
+          <text x="580" y="168" style="fill:var(--ink-soft)">listens on phone localhost only</text>
+          <text x="580" y="188" style="fill:var(--ink-faint)">counted as the phone's own use</text>
+          <text x="580" y="208" style="fill:var(--ink-faint)">tethering: off</text>
+        </g>
+      </svg></div>
+      <div class="legend">
+        <span><i style="background:var(--blue)"></i>on the Mac</span>
+        <span><i style="background:var(--amber)"></i>on the phone</span>
+        <span><i style="background:var(--teal)"></i>traffic</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>The three things that make it work</h2>
+    <p class="sub">Each one fixes a specific way earlier versions failed.</p>
+    <div class="grid3">
+      <div class="card tile">
+        <span class="tag amber">Not hotspot</span>
+        <h3>The phone opens the connections</h3>
+        <p>Hotspot and tethering forward another device's packets. Here a normal process on the phone opens each connection itself, the same path any app uses. Android counts all of it as the phone's own use.</p>
+      </div>
+      <div class="card tile">
+        <span class="tag teal">UDP works</span>
+        <h3>UDP rides inside the TCP pipe</h3>
+        <p><code>adb forward</code> only carries TCP. UDP-over-TCP packs each UDP flow into it, so DNS, QUIC, NTP, calls and WireGuard all get through, not just web pages.</p>
+      </div>
+      <div class="card tile">
+        <span class="tag blue">Wi-Fi optional</span>
+        <h3>macOS treats it as the real connection</h3>
+        <p>A tiny helper makes the uplink the first-choice DNS and the <b>primary</b> connection. With Wi-Fi off, apps don't decide you're offline, and turning Wi-Fi on or off can't take the route back.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>Proof it isn't tethering</h2>
+    <p class="sub">Read straight from the phone with <code>adb shell dumpsys</code> during a session.</p>
+    <div class="card scroll">
+      <table>
+        <thead><tr><th>Check on the phone</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Tethering upstream</td><td class="ok">null · tethering off</td></tr>
+          <tr><td>Tethering interfaces (rndis / ncm / hotspot)</td><td class="ok">none</td></tr>
+          <tr><td>Data counted as tethering (uid −5)</td><td class="ok">none</td></tr>
+          <tr><td>Data counted to our process (shell, uid 2000)</td><td class="ok">all of it · normal on-device use</td></tr>
+          <tr><td>Interface used</td><td><code>rmnet_data0</code> · the phone's mobile data</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="sub" style="margin-top:12px">Billing is still the carrier's call. Deep inspection could spot that the content comes from a Mac. The final word is your carrier's hotspot-usage counter: note it, use the uplink, and check that it hasn't moved.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">04</span>How we got here</h2>
+    <p class="sub">Two earlier designs, both removed and both still in git history.</p>
+    <div class="card">
+      <ol class="timeline">
+        <li><span class="dot bad">1</span><div><b>Userspace RNDIS driver</b><span>Made Android USB tethering work on Apple Silicon. It worked, but tethering <i>is</i> the hotspot meter.</span></div></li>
+        <li><span class="dot bad">2</span><div><b>Every Proxy + tun2socks</b><span>Used the phone's on-device path, but the adb pipe is TCP-only. DNS and all other UDP failed as soon as Wi-Fi went off.</span></div></li>
+        <li><span class="dot ok">3</span><div><b>sing-box on both ends (now)</b><span>UDP inside TCP, DNS answered locally, macOS told it's the primary connection. Nothing is installed on the phone and no root is needed.</span></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">05</span>Nothing outlives it</h2>
+    <p class="sub">Every change belongs to a process, and goes away with it, even after a crash or <code>kill -9</code>.</p>
+    <div class="card scroll">
+      <table>
+        <thead><tr><th>Change</th><th>Owned by</th><th>Removed when</th></tr></thead>
+        <tbody>
+          <tr><td>Routes</td><td><code>utun225</code></td><td>sing-box exits (the kernel deletes them)</td></tr>
+          <tr><td>DNS + primary connection</td><td>temporary macOS setting</td><td><code>dnshold</code> exits (macOS deletes it)</td></tr>
+          <tr><td>Phone server</td><td><code>adb shell</code> session</td><td>the session or cable goes away</td></tr>
+          <tr><td>Tailscale settings</td><td colspan="2">never touched</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">06</span>Using it</h2>
+    <p class="sub">The password is needed once, for install. On/off after that needs none, from the terminal or Raycast.</p>
+<pre class="cmd"><span class="c"># once</span>
+./uplink.sh setup            <span class="c"># fetch sing-box, build helper, copy to phone</span>
+sudo ./uplink.sh install     <span class="c"># launchd job + passwordless start/stop</span>
+
+<span class="c"># day to day — no sudo</span>
+./uplink.sh toggle           <span class="c"># or Raycast: "Phone Uplink Toggle"</span>
+./uplink.sh status           <span class="c"># 📱 Phone uplink ON · 140ms · exit 172.56.x.x</span>
+./uplink.sh check            <span class="c"># exit IP, DNS, UDP, primary, MagicDNS</span></pre>
+  </section>
+
+  <footer>uplink.sh · sing-box 1.14.3 on both ends · tested on Galaxy Z Flip6, Android 16, T-Mobile</footer>
+</div>
+</body>
+</html>

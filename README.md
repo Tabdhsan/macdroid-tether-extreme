@@ -1,127 +1,162 @@
 # macdroid-tether-extreme
 
-**Android USB tethering on modern macOS — in userspace. No kernel extension, no SIP changes, no App Store app.**
+**Use your Android phone's own mobile data as your Mac's internet over the USB cable, without it counting as hotspot or tethering.**
 
-Plug an Android phone into a Mac, turn on USB tethering, run one command, and get a native network connection over the cable. Works on Apple Silicon.
+Every app on the Mac goes through the phone, including browsers, terminals, Slack and video calls, over both TCP and UDP. Nothing needs installing on the phone, root isn't needed, and if anything crashes nothing is left behind.
 
+```sh
+./uplink.sh setup            # once
+sudo ./uplink.sh install     # once
+./uplink.sh toggle           # on / off, no password (or use Raycast)
 ```
-sudo ./macdroid-tether-extreme --default-route
-```
 
-> **Educational and research use.** This project documents how USB networking, the RNDIS protocol, and on-device data paths work on macOS. Use it with your own devices and in accordance with the terms of service of your carrier and network.
+> **Educational and research use.** Use it with your own devices and in line with your carrier's terms.
+
+For a visual walkthrough, open [`how-it-works.html`](how-it-works.html) in a browser.
 
 ---
 
-## Why this exists
-
-When an Android phone enables "USB tethering," it speaks **RNDIS** (Microsoft's *Remote NDIS* — Ethernet tunneled over USB). Windows and Linux ship an RNDIS host driver. **macOS never has.** Plug in an Android phone and it shows up in Network settings as a device the Mac has no idea how to talk to — `SAMSUNG_Android — Not connected` — and just sits there. (iPhone USB tethering works, because Apple wrote a driver for it; Android's RNDIS gets nothing.)
-
-For years the fix was [**HoRNDIS**](https://github.com/jwise/horndis), a kernel extension that added the missing driver. It's dead:
-
-- **x86-only** — never built for `arm64e`, so it can't load on Apple Silicon at all.
-- **Kexts are over** — Apple has been dismantling third-party kernel extensions since 2019; recent macOS releases removed hooks HoRNDIS depended on.
-
-`macdroid-tether-extreme` does the same job HoRNDIS did, but entirely in **userspace** — so none of the kernel-extension problems apply. No `arm64e` kext signing, no reduced security, no reboots.
-
-## How it works (high level)
-
-The whole thing is one C file. It uses two ordinary building blocks:
-
-- **[libusb](https://libusb.info/)** to talk to the phone's RNDIS endpoint directly from userspace.
-- **utun** (macOS's userspace tunnel device) to hand packets to the network stack.
+## How it works
 
 ```
-your apps  →  utun interface  →  macdroid-tether-extreme  →  libusb  →  phone (RNDIS)  →  5G
-                                  └── wraps/unwraps packets, runs DHCP, answers ARP ──┘
+Mac apps ─▶ utun225 (sing-box tun) ─▶ SOCKS5 + UDP-over-TCP ─▶ adb forward ─▶ USB cable
+        ─▶ phone: sing-box SOCKS server, started via `adb shell` ─▶ phone's mobile data
 ```
 
-On startup it opens the phone's USB control + data interfaces, runs the RNDIS handshake (init → query MAC → set packet filter), then pumps traffic: read an IP packet from `utun`, wrap it in Ethernet + an RNDIS header, write it to the phone's bulk USB endpoint, and the reverse inbound. A tiny built-in DHCP client gets an IP from the phone, and an ARP responder keeps the link addressable.
+1. **On the phone:** `uplink.sh` copies a [sing-box](https://sing-box.sagernet.org) binary to `/data/local/tmp` and runs it through `adb shell` as a small SOCKS server. It listens only on the phone's own localhost, so nothing is exposed on the phone's Wi-Fi.
+2. **On the cable:** `adb forward` connects Mac `127.0.0.1:8901` to the phone's server over USB.
+3. **On the Mac:** a second sing-box creates the `utun225` network interface and routes the whole internet into it. It sends every connection down the cable to the phone.
+4. The phone's server opens each connection itself, through its normal mobile-data connection.
 
-**Full write-up with the architecture, packet diagrams, and the debugging story:** [`problem-statement.html`](problem-statement.html) (open it in a browser).
+### Why it isn't hotspot or tethering
+
+Hotspot and USB tethering are Android features that forward *another device's* packets. Here, neither is used. The connections are opened by a normal process on the phone, the same path any app uses. The phone itself reports this:
+
+| Checked on the phone (`adb shell dumpsys …`) | Result |
+|---|---|
+| Tethering upstream | `null`. Tethering is off. |
+| Tethering interfaces (rndis / ncm / hotspot) | none |
+| Data Android counts as tethering (uid −5) | none |
+| Data counted to our process (shell, uid 2000) | all of it, as normal on-device use |
+
+The carrier sees the phone's own connections on its normal data connection. One honest caveat: the *content* still comes from a Mac, so a carrier that inspects traffic in depth (TLS fingerprints, user-agents) could tell. The real proof is your carrier's own **hotspot usage** counter. Note it before a long session and check that it hasn't moved.
+
+### UDP works (DNS, QUIC, calls)
+
+`adb forward` only carries TCP. sing-box's **UDP-over-TCP** sends each UDP flow inside the TCP connection to the phone, and the phone's server unpacks it. So DNS, QUIC/HTTP3, NTP, video calls and Tailscale's WireGuard all work, not just web pages.
+
+### DNS, and Tailscale MagicDNS
+
+The Mac's sing-box answers every DNS lookup itself:
+
+- **Public names** go over encrypted DNS (DoH) to `1.1.1.1`, through the phone.
+- **`*.ts.net` names** go to Tailscale's own resolver, `100.100.100.100`, so MagicDNS (`ssh cloudy`) keeps working. Tailscale's settings are never changed.
+
+A small helper, [`uplink/dnshold.c`](uplink/dnshold.c), makes this the Mac's first-choice resolver, ahead of Tailscale. It also marks the uplink as macOS's **primary** connection. Without that, macOS thinks you're offline whenever Wi-Fi is off, and Chrome shows `ERR_INTERNET_DISCONNECTED` even though traffic would flow.
+
+DNS answers are IPv4 only. All IPv6 traffic is still routed into the tunnel, so none of it leaks around the phone.
+
+### Routing
+
+sing-box adds routes that cover the whole internet. They're more specific than the normal default route, so turning Wi-Fi on or off can't take traffic back. Your LAN (192.168.x and similar) and your tailnet (`100.64.0.0/10`) stay direct whenever they're reachable.
+
+---
 
 ## Requirements
 
-- Apple Silicon or Intel Mac, macOS 11+
-- [libusb](https://libusb.info/): `brew install libusb`
-- An Android phone (developed and tested against a Samsung Galaxy Z Flip, Android 16 / One UI)
+- An Apple Silicon Mac. Xcode Command Line Tools are needed for `setup`, which compiles the small helper.
+- `adb`: `brew install --cask android-platform-tools`
+- An Android phone with **USB debugging** on and this Mac allowed (`adb devices` shows `device`). Tested on a Galaxy Z Flip6 with Android 16 on T-Mobile.
+- Turn the **phone's** Wi-Fi off if you want mobile data. The Mac's Wi-Fi can be on or off.
 
-## Build
+You don't need root on the phone, a proxy app, or USB tethering.
+
+## Setup
 
 ```sh
-make
+./uplink.sh setup           # downloads sing-box 1.14.3 (Mac + Android), builds dnshold, copies to the phone
+sudo ./uplink.sh install    # installs the on/off switch (see below), once
 ```
 
-Produces a ~54 KB binary, `macdroid-tether-extreme`. (Note: if your shell aliases `cc`, the Makefile calls `clang` explicitly.)
+### What `install` does
 
-## Use
+You need the password once, here. After that, turning it on and off needs none:
 
-1. Plug in the phone and enable **USB tethering** from Settings → Connections → Mobile Hotspot and Tethering. (This leaves the phone in RNDIS mode — exactly what this tool wants.)
-2. Run it:
-   ```sh
-   sudo ./macdroid-tether-extreme --default-route
-   ```
-   Root is required to create the `utun` interface and claim the USB device.
-3. Turn off Wi-Fi. All traffic now flows over USB.
-4. Press **Ctrl+C** to stop — it restores your previous default route and DNS and tears down the interface.
+- It copies everything, **root-owned**, to `/Library/PrivilegedHelperTools/mooch-uplink/`.
+- It registers the launchd job `com.mooch.uplink`, which **never starts at boot**, only when you turn it on. launchd runs it in the background, so no Terminal window needs to stay open.
+- It adds `/etc/sudoers.d/mooch-uplink`, which lets your user run exactly two commands without a password: start that job and stop it.
 
-### Options
+The rule can't be used to run anything else as root. Every file the job runs is root-owned, and when running as root the script only uses system binaries. adb and tailscale run as your user.
 
-| Flag | Effect |
-|---|---|
-| *(none)* | **Probe/test mode.** Runs the RNDIS handshake + DHCP and adds a route for `1.1.1.1` only, so it won't touch your existing routes. `ping 1.1.1.1` to verify. |
-| `--default-route` | Route **all** traffic through the phone, and register the phone's DNS with the system resolver. |
-| `--mtu <n>` | Set the interface MTU (default 1500). **Use `--mtu 1400` if a VPN is running on the phone** — otherwise large packets get black-holed and throughput collapses. |
+Re-run `sudo ./uplink.sh install` after changing anything in this repo. `sudo ./uplink.sh uninstall` removes all three.
 
-Without root, the tool runs in probe mode automatically (handshake + DHCP, no interface setup) — handy for testing that the USB path works.
+## Usage
 
-## Gotchas
-
-- **Don't use `adb shell svc usb setFunctions` to force NCM.** It creates a zombie network interface on the phone; Android then serves DHCP on the dead interface while the live one stays down, and no data flows. Enable tethering through the Settings UI only. If you've already done it and hit `NO-CARRIER`, reboot the phone.
-- **Keep the terminal open while tethering** — the process *is* the driver. Closing it drops the connection (cleanly).
-- **Carrier tethering policy applies.** This is IP-level NAT tethering, so the traffic is metered as tethered/hotspot data. Worth knowing from testing: an on-*phone* VPN does **not** tunnel a tethered computer's traffic (Android only routes the phone's own apps through it), and a TTL adjustment alone did not move a hard, network-enforced cap. If your plan meters tethered data separately from on-device data, the proxy method below rides the on-device path instead.
-
-## Measured
-
-The userspace bridge moves traffic end-to-end (TCP / TLS / DNS) — verified on a Galaxy Z Flip. **Actual throughput depends entirely on your own device, carrier, plan, and signal; any numbers here are one-off observations on one setup, not what you should expect.**
-
-The point worth taking away isn't a speed figure — it's that many plans meter *tethered/hotspot* data separately from *on-device* data. In one observation on a plan whose high-speed hotspot allowance was used up, tethered throughput sat far below the phone's own on-device speed over the same 5G, and no client-side change moved it. That's a carrier policy, not a property of this tool. The proxy method below uses the on-device path instead.
-
-## Alternative: on-device proxy over USB (`mooch.sh`)
-
-The tether above forwards packets at the IP layer, so its traffic is metered as tethered data. A different approach pipes traffic through a proxy app running *on the phone*, over the USB cable with `adb` — no tethering interface at all. Because the proxy app makes its own connections, requests travel the phone's normal on-device data path.
-
-With **SOCKS5** enabled, the macOS system SOCKS proxy routes **all apps** (Telegram, Slack, Spotify, etc.) through the phone — not just browsers and CLI tools. HTTP-only mode still works but is limited to proxy-aware apps.
-
-### How to run
-
-1. **Phone — install the proxy app.** Install [Every Proxy](https://play.google.com/store/apps/details?id=com.emanuelef.everyproxy) (free, no root).
-2. **Phone — turn on SOCKS5** (and optionally HTTP). In Every Proxy, enable the **SOCKS5** proxy (default port `1080`). You can also enable **HTTP** (port `8080`) for CLI tools, but SOCKS5 alone is enough.
-3. **Phone — enable USB debugging** (Settings → Developer options), plug into the Mac, and confirm `adb devices` lists it.
-4. **Mac — start mooching** (must be **sourced**):
-   ```sh
-   source ./mooch.sh on
-   ```
-   This sets up `adb` forwards over USB, probes which proxies are live, sets the macOS system SOCKS proxy (so Telegram etc. work), and exports shell env vars for CLI tools. At least one proxy (HTTP or SOCKS5) must be running on the phone.
-5. **Mac — stop:**
-   ```sh
-   source ./mooch.sh off
-   ```
-   Reverts everything — system proxy off, env vars unset, `adb` forwards removed. `source ./mooch.sh status` shows the current state at any time.
-
-### Wi-Fi on or off?
-
-Keep Wi-Fi **on** (but you don't need to be connected to a network). The macOS system SOCKS proxy is tied to the active network service — turning Wi-Fi off disables that service and apps like Telegram lose their proxy route. The USB pipe itself works fine either way; it's just the system proxy setting that needs the service active.
-
-### Ports
-
-| Proxy | Phone port | Mac localhost port |
+| Command | sudo | What it does |
 |---|---|---|
-| SOCKS5 | `1080` | `8900` |
-| HTTP | `8080` | `8899` |
+| `./uplink.sh toggle` | no | On if off, off if on |
+| `./uplink.sh start` / `stop` | no | Explicit on / off. `start` waits until it's verified. |
+| `./uplink.sh status` | no | One line: `📱 Phone uplink ON · 140ms · exit 172.56.x.x` or `⚪ OFF` |
+| `./uplink.sh check` | no | Full diagnosis: exit IP matches the phone's, DNS, real UDP, primary connection, MagicDNS |
+| `sudo ./uplink.sh up` | yes | Foreground mode for debugging. That window is the switch, and Ctrl+C turns it off. |
+| `sudo ./uplink.sh down` | yes | Force teardown from any terminal |
 
-If Every Proxy uses different ports, edit `_TTHR_PHONE_SOCKS_PORT` / `_TTHR_PHONE_PORT` at the top of `mooch.sh`.
+**Raycast:** `~/repos/raycast-scripts` has **Phone Uplink Toggle** and an inline **Phone Uplink** status line that refreshes every 30 seconds. Both call the installed copy.
 
-`mooch.sh` must be **sourced** (not executed) so it can set/clear the proxy variables in your shell. Run `source ./mooch.sh on` in each new terminal whose CLI tools (e.g. `claude`) you want on the phone.
+### Checking it's really working
+
+```
+$ ./uplink.sh check
+  ✓ transport   exit 172.56.161.6 = phone's exit (114ms)
+  ✓ DNS         names resolve (resolver #1: 172.19.0.2)
+  ✓ UDP         NTP round-trip 52ms (non-DNS UDP)
+  ✓ primary     macOS sees utun225 as the main connection (Chrome etc. won't say offline)
+  ✓ MagicDNS    tabishs-macbook-pro.tail463fec.ts.net resolves
+```
+
+The key line is `exit … = phone's exit`. It means the Mac's public IP is the phone's mobile-data IP. `ping` isn't a valid test, because ICMP isn't carried. Use `check`.
+
+## Crash safety
+
+Nothing outlives the processes that own it:
+
+- **Routes** belong to `utun225`. The kernel deletes them when sing-box exits.
+- **DNS** is a *temporary* macOS setting held by `dnshold`. macOS deletes it when `dnshold` exits, even on `kill -9`.
+- **The phone server** runs inside an `adb shell` session and dies with it.
+- **Tailscale** settings are never touched.
+
+A reboot is never needed to recover. If the cable is unplugged and plugged back in, the phone side restarts on its own within a few seconds.
+
+Logs: `/tmp/mooch-uplink.log` for events, and `/tmp/mooch-uplink.out` for the launchd job's output. While running, per-process logs are in `/tmp/mooch-uplink/`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `adb devices` is empty, but the phone charges | USB debugging is off. On Samsung, **Auto Blocker** (Settings → Security and privacy) blocks it even when the toggle is on. Turn it off, replug, and choose **Transferring files**. |
+| `adb devices` says `unauthorized` | Unlock the phone, tap **Allow** on "Allow USB debugging?", and tick "Always allow". |
+| `📵 Phone not on adb` | As above. Check the cable too. |
+| Exit IP is the phone's but slow | That's the phone's own signal and plan. The USB link moves over 2 Gbit/s and isn't the bottleneck. |
+| `up` warns the phone is on Wi-Fi | Turn the phone's Wi-Fi off, or you'll be using that Wi-Fi rather than mobile data. |
+| An app says offline | Run `./uplink.sh check` and look at the `primary` line. |
+| Anything stuck | `sudo ./uplink.sh down`. Even a crash cleans up after itself (see above). |
+
+## Layout
+
+| Path | What |
+|---|---|
+| `uplink.sh` | Everything: setup, install, on/off, checks |
+| `uplink/mac.json` | Mac sing-box config: tun, routes, DNS, phone outbound (UDP-over-TCP) |
+| `uplink/phone.json` | Phone sing-box config: SOCKS server on phone localhost, DoH resolver |
+| `uplink/dnshold.c` | Holds the DNS + primary-service registration for as long as it runs |
+| `how-it-works.html` | Visual explainer |
+
+## History
+
+Earlier versions of this repo took two other routes. Both are removed but still in git history:
+
+1. **A userspace RNDIS driver** (`macdroid_tether_extreme.c`). It was a HoRNDIS replacement that made Android USB tethering work on Apple Silicon. It worked, but tethering *is* the hotspot meter.
+2. **Every Proxy + `mooch.sh`** (with a tun2socks transparent mode). It used the on-device data path, but `adb forward` only carries TCP, so DNS and all other UDP failed whenever Wi-Fi was off.
 
 ## License
 

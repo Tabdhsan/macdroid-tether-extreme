@@ -1,0 +1,15 @@
+{
+  "log": { "level": "warn", "timestamp": true },
+  "dns": {
+    "servers": [
+      { "type": "https", "tag": "doh", "server": "1.1.1.1" }
+    ]
+  },
+  "inbounds": [
+    { "type": "socks", "tag": "socks-in", "listen": "127.0.0.1", "listen_port": 1090 }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" }
+  ],
+  "route": { "default_domain_resolver": "doh" }
+}

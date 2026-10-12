@@ -1,0 +1,101 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "https",
+        "tag": "doh",
+        "server": "1.1.1.1",
+        "detour": "phone"
+      },
+      {
+        "type": "udp",
+        "tag": "tailnet",
+        "server": "100.100.100.100"
+      }
+    ],
+    "rules": [
+      {
+        "domain_suffix": [
+          "ts.net"
+        ],
+        "server": "tailnet"
+      }
+    ],
+    "final": "doh",
+    "strategy": "ipv4_only"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "utun225",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1500,
+      "auto_route": true,
+      "route_exclude_address": [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "224.0.0.0/4",
+        "100.64.0.0/10",
+        "fc00::/7",
+        "fe80::/10",
+        "ff00::/8",
+        "fd7a:115c:a1e0::/48"
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "phone",
+      "server": "127.0.0.1",
+      "server_port": 8901,
+      "version": "5",
+      "udp_over_tcp": {
+        "enabled": true,
+        "version": 2
+      }
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "port": 53,
+        "action": "hijack-dns"
+      },
+      {
+        "ip_is_private": true,
+        "action": "reject"
+      },
+      {
+        "ip_cidr": [
+          "100.64.0.0/10",
+          "fd7a:115c:a1e0::/48"
+        ],
+        "action": "reject"
+      }
+    ],
+    "final": "phone",
+    "default_domain_resolver": "doh"
+  }
+}
