@@ -101,7 +101,7 @@ Re-run `sudo ./macdroid.sh install` after changing anything in this repo. `sudo 
 | `sudo ./macdroid.sh up` | yes | Foreground mode for debugging. That window is the switch, and Ctrl+C turns it off. |
 | `sudo ./macdroid.sh down` | yes | Force teardown from any terminal |
 
-**Raycast:** `~/repos/raycast-scripts` has **MacDroid Toggle** and an inline **MacDroid Status** line that refreshes every 30 seconds. Both call the installed copy.
+**Raycast:** `~/repos/custom-raycast/scripts` has **MacDroid Toggle** and an inline **MacDroid Status** line that refreshes every 30 seconds. Both call the installed copy.
 
 ### Checking it's really working
 
