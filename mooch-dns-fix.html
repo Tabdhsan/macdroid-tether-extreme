@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mooch: the DNS fix</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  :root {
+    --ground:    #eef0f3;
+    --surface:   #f8f9fb;
+    --surface-2: #e6e9ee;
+    --hairline:  #d3d8e0;
+    --ink:       #16202b;
+    --ink-soft:  #46525f;
+    --ink-faint: #6b7784;
+    --amber:     #b9791a;   /* the phone / carrier path */
+    --amber-bg:  #f6ead2;
+    --teal:      #12796e;   /* works */
+    --teal-bg:   #d9ece9;
+    --red:       #c23b31;   /* broken */
+    --red-bg:    #f6dcd9;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0f1720; --surface:#16202c; --surface-2:#1e2a38; --hairline:#2a3947;
+      --ink:#e6ebf1; --ink-soft:#a7b4c2; --ink-faint:#6f8091;
+      --amber:#e6a038; --amber-bg:#2a2416; --teal:#3fc0b0; --teal-bg:#12292a;
+      --red:#e8675c; --red-bg:#2c1a1a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0f1720; --surface:#16202c; --surface-2:#1e2a38; --hairline:#2a3947;
+    --ink:#e6ebf1; --ink-soft:#a7b4c2; --ink-faint:#6f8091;
+    --amber:#e6a038; --amber-bg:#2a2416; --teal:#3fc0b0; --teal-bg:#12292a;
+    --red:#e8675c; --red-bg:#2c1a1a;
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 22px 72px; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.7rem; font-weight: 500;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--amber); margin: 0;
+  }
+  h1 {
+    font-family: var(--mono); font-weight: 700;
+    font-size: clamp(1.55rem, 4.4vw, 2.25rem);
+    letter-spacing: -0.01em; text-wrap: balance; margin: 12px 0 0;
+  }
+  .lede { font-size: clamp(1rem, 2.2vw, 1.1rem); color: var(--ink-soft); max-width: 60ch; margin: 14px 0 0; }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  /* clean banner */
+  .banner {
+    display: flex; align-items: center; gap: 12px;
+    margin: 26px 0 0; padding: 14px 18px;
+    background: var(--teal-bg); border: 1px solid color-mix(in srgb, var(--teal) 35%, transparent);
+    border-radius: 12px; color: var(--ink);
+  }
+  .banner .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--teal); flex: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--teal) 22%, transparent); }
+  .banner b { font-family: var(--mono); }
+  .banner small { color: var(--ink-soft); display: block; font-size: 0.82rem; }
+
+  section { margin-top: 42px; }
+  h2 {
+    font-family: var(--mono); font-weight: 700; font-size: 1.15rem;
+    margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px;
+  }
+  h2 .num {
+    font-size: 0.72rem; color: var(--amber); border: 1px solid var(--amber);
+    border-radius: 6px; padding: 2px 7px; letter-spacing: 0.1em;
+  }
+  .sub { color: var(--ink-faint); font-size: 0.9rem; margin: 0 0 16px; }
+
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 20px 22px; }
+  .card + .card { margin-top: 14px; }
+  p { margin: 0 0 12px; }
+  p:last-child { margin-bottom: 0; }
+  b, strong { color: var(--ink); }
+
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
+  .cmd {
+    font-family: var(--mono); font-size: 0.85rem; background: var(--ink);
+    color: #e6ebf1; padding: 12px 15px; border-radius: 9px; overflow-x: auto;
+    white-space: pre; margin: 6px 0 0;
+  }
+  :root[data-theme="dark"] .cmd, :root:not([data-theme="light"]) .cmd { background: #0a1119; border: 1px solid var(--hairline); }
+  .cmd .c { color: #7f8b99; }
+  .cmd .g { color: #62c5b6; }
+  .cmd .a { color: #e6a038; }
+
+  /* resolver flow diagram */
+  .flow { display: grid; gap: 8px; margin-top: 4px; }
+  .hop { display: flex; align-items: center; gap: 12px; font-family: var(--mono); font-size: 0.82rem; padding: 9px 13px; border-radius: 8px; border: 1px solid var(--hairline); background: var(--surface-2); }
+  .hop .tag { font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); flex: none; width: 92px; }
+  .hop.bad { background: var(--red-bg); border-color: color-mix(in srgb, var(--red) 35%, transparent); }
+  .hop.bad .tag { color: var(--red); }
+  .hop.good { background: var(--teal-bg); border-color: color-mix(in srgb, var(--teal) 35%, transparent); }
+  .hop.good .tag { color: var(--teal); }
+  .arrow { text-align: center; color: var(--ink-faint); font-size: 0.9rem; line-height: 0.6; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; }
+  .pill { font-family: var(--mono); font-size: 0.74rem; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--hairline); color: var(--ink-soft); background: var(--surface); }
+  .pill.amber { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: var(--amber-bg); }
+  .pill.teal { color: var(--teal); border-color: color-mix(in srgb, var(--teal) 40%, transparent); background: var(--teal-bg); }
+
+  /* state table */
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+  td .state { font-family: var(--mono); font-weight: 700; }
+  .ok { color: var(--teal); font-weight: 600; }
+  .no { color: var(--red); font-weight: 600; }
+  td code { font-size: 0.78rem; }
+
+  /* checklist */
+  .steps { list-style: none; counter-reset: s; margin: 0; padding: 0; }
+  .steps > li {
+    position: relative; counter-increment: s; padding: 0 0 0 44px; margin: 0 0 18px;
+  }
+  .steps > li::before {
+    content: counter(s); position: absolute; left: 0; top: -2px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--amber-bg); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+    font-family: var(--mono); font-weight: 700; font-size: 0.9rem;
+    display: grid; place-items: center;
+  }
+  .steps h3 { margin: 4px 0 6px; font-size: 0.98rem; }
+  .steps .hint { color: var(--ink-faint); font-size: 0.85rem; margin: 6px 0 0; }
+
+  label.chk { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 7px 0; font-size: 0.9rem; }
+  label.chk input { margin-top: 3px; width: 15px; height: 15px; accent-color: var(--teal); flex: none; }
+  label.chk span { color: var(--ink-soft); }
+  label.chk input:checked + span { color: var(--ink-faint); text-decoration: line-through; }
+
+  .expect { margin-top: 8px; padding: 12px 15px; border-radius: 9px; background: var(--teal-bg); border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent); font-size: 0.85rem; }
+  .expect .k { font-family: var(--mono); font-weight: 700; color: var(--teal); display: block; margin-bottom: 4px; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+  .expect code { background: color-mix(in srgb, var(--teal) 14%, transparent); }
+
+  .safety { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-top: 6px; }
+  @media (max-width: 620px) { .safety { grid-template-columns: 1fr; } }
+  .safety .box { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; padding: 13px 15px; }
+  .safety .box b { font-family: var(--mono); font-size: 0.82rem; color: var(--amber); }
+  .safety .box p { font-size: 0.83rem; color: var(--ink-soft); margin: 5px 0 0; }
+
+  .foot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--hairline); color: var(--ink-faint); font-size: 0.8rem; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">mooch · transparent mode</p>
+  <h1>Why DNS broke — and how it's fixed</h1>
+  <p class="lede">Routing your Mac through the phone was the <b>easy</b> half. Getting names to resolve once Wi-Fi is off was the half that fought back. Here's the problem in plain terms, the fix, and exactly what to run.</p>
+
+  <div class="banner">
+    <span class="dot"></span>
+    <div>
+      <b>Right now: everything is clean.</b>
+      <small>No tunnel running · no leftover routes or DNS overrides · Wi-Fi is your uplink · Tailscale DNS normal. Safe to start a fresh test.</small>
+    </div>
+  </div>
+
+  <!-- ============ PROBLEM ============ -->
+  <section>
+    <h2><span class="num">01</span> The problem</h2>
+    <p class="sub">Two things quietly broke DNS in the one state that matters: Wi-Fi off, phone on.</p>
+
+    <div class="card">
+      <p><b>macOS ties DNS to a network <em>service</em>.</b> The old fix set DNS on the <b>Wi-Fi service</b>. The moment you turn Wi-Fi off, macOS tears that service down — and your DNS setting vanishes with it. So the exact situation you want (phone-only) is the one where DNS dies.</p>
+    </div>
+
+    <div class="card">
+      <p><b>And your real resolver isn't Wi-Fi — it's Tailscale.</b> Tailscale owns the top resolver and forwards lookups to whatever it captured underneath: your home router, <code>192.168.1.1</code>. With Wi-Fi off, the router is unreachable, so every name fails — even though traffic itself is happily flowing through the phone.</p>
+      <div class="flow" style="margin-top:14px">
+        <div class="hop"><span class="tag">you type</span><span>reddit.com&nbsp; → &nbsp;needs a DNS answer</span></div>
+        <div class="arrow">▾</div>
+        <div class="hop bad"><span class="tag">resolver #1</span><span>Tailscale · 100.100.100.100 &nbsp;→ forwards to…</span></div>
+        <div class="arrow">▾</div>
+        <div class="hop bad"><span class="tag">upstream</span><span>192.168.1.1 (home router) &nbsp;·&nbsp; ✗ unreachable with Wi-Fi off</span></div>
+      </div>
+      <p style="margin-top:14px">That's why your test showed <span class="ok">transport ✓</span> but <span class="no">DNS ✗</span> in State 2 — and why you had to do that awkward Wi-Fi off / on / off / on dance to claw internet back.</p>
+    </div>
+  </section>
+
+  <!-- ============ SOLUTION ============ -->
+  <section>
+    <h2><span class="num">02</span> The fix</h2>
+    <p class="sub">Give DNS its own home on the tunnel, and move Tailscale out of the way just while mooch runs.</p>
+
+    <div class="card">
+      <p><b>1 · DNS now lives on the tunnel, not on Wi-Fi.</b> mooch registers <code>1.1.1.1</code> as its <em>own</em> network service bound to the <code>utun</code> interface (via <code>scutil</code> — the same trick the C tether uses). It doesn't care whether Wi-Fi is on or off, and it evaporates on reboot so it can never get stuck.</p>
+      <p><b>2 · Tailscale steps aside for the session.</b> While the tunnel is up, mooch runs <code>tailscale set --accept-dns=false</code> so your <code>1.1.1.1</code> becomes the resolver in charge. Your VPN stays connected — only DNS management is paused — and it's turned back on the instant you stop.</p>
+      <div class="flow" style="margin-top:14px">
+        <div class="hop"><span class="tag">you type</span><span>reddit.com&nbsp; → &nbsp;needs a DNS answer</span></div>
+        <div class="arrow">▾</div>
+        <div class="hop good"><span class="tag">resolver #1</span><span>mooch · 1.1.1.1 &nbsp;(bound to the tunnel)</span></div>
+        <div class="arrow">▾</div>
+        <div class="hop good"><span class="tag">out</span><span>through the phone's cellular &nbsp;·&nbsp; ✓ resolves</span></div>
+      </div>
+      <div class="pills" style="margin-top:16px">
+        <span class="pill teal">survives Wi-Fi off</span>
+        <span class="pill teal">clears on reboot</span>
+        <span class="pill amber">Tailscale VPN stays up</span>
+        <span class="pill">every app, no config</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <p style="margin-bottom:6px"><b>Two new safety tools came with it:</b></p>
+      <p><code>/tmp/mooch.log</code> — a timestamped log of everything mooch does (route steals, DNS changes, teardown), so you can see what happened as you flip Wi-Fi. &nbsp;·&nbsp; <code>sudo ./mooch.sh dns-reset</code> — one command that un-sticks DNS no matter what: clears the override, resets services to DHCP, turns Tailscale DNS back on.</p>
+    </div>
+  </section>
+
+  <!-- ============ WHAT TO EXPECT PER STATE ============ -->
+  <section>
+    <h2><span class="num">03</span> The three states &amp; what each should show</h2>
+    <p class="sub">Always check with <code>./mooch.sh check</code> — never <code>ping</code> (ICMP can't cross the tunnel, so it lies).</p>
+    <div class="card" style="overflow-x:auto">
+      <table>
+        <thead><tr><th>State</th><th>Transport</th><th>DNS</th><th>Exit / resolver</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="state">0</span><br><small>Wi-Fi off · mooch off</small></td>
+            <td><span class="no">✗ none</span></td>
+            <td><span class="no">✗ none</span></td>
+            <td>nothing — correct, no uplink exists</td>
+          </tr>
+          <tr>
+            <td><span class="state">1</span><br><small>Wi-Fi on · mooch off</small></td>
+            <td><span class="ok">✓</span> via Wi-Fi 🛜</td>
+            <td><span class="ok">✓</span></td>
+            <td>exit <code>96.232.x</code> · resolver <code>100.100.100.100</code></td>
+          </tr>
+          <tr style="background:var(--teal-bg)">
+            <td><span class="state">2</span><br><small>Wi-Fi off · mooch on</small><br><span class="pill amber" style="margin-top:6px;display:inline-block">the goal</span></td>
+            <td><span class="ok">✓</span> via phone 📱</td>
+            <td><span class="ok">✓</span></td>
+            <td>exit <code>172.56.x</code> · resolver <b><code>1.1.1.1</code></b></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ TEST CHECKLIST ============ -->
+  <section>
+    <h2><span class="num">04</span> Test it — checklist</h2>
+    <p class="sub">You're clean and in State 1 now. Re-run State 2, the one that was broken. Tick as you go.</p>
+
+    <ol class="steps">
+      <li>
+        <h3>Open Terminal A — start the tunnel</h3>
+        <div class="cmd"><span class="c">cd ~/repos/macdroid-tether-extreme</span>
+<span class="a">sudo</span> ./mooch.sh transparent</div>
+        <p class="hint">Leave this window open — it <em>is</em> the switch. Ctrl+C later = clean stop.</p>
+        <div class="expect">
+          <span class="k">Expect to see</span>
+          <label class="chk"><input type="checkbox"><span><code>↪ paused Tailscale DNS for the session (VPN stays up)</code></span></label>
+          <label class="chk"><input type="checkbox"><span><code>✓ DNS → 1.1.1.1 1.0.0.1 (bound to utun…, survives Wi-Fi off)</code></span></label>
+          <label class="chk"><input type="checkbox"><span><code>TRANSPARENT MODE ON</code> banner</span></label>
+        </div>
+      </li>
+
+      <li>
+        <h3>Turn the Mac's Wi-Fi OFF</h3>
+        <p class="hint">Menu bar → Wi-Fi → off. Now the phone is your only uplink — this is real State 2.</p>
+      </li>
+
+      <li>
+        <h3>Open Terminal B — run the check</h3>
+        <div class="cmd"><span class="c">cd ~/repos/macdroid-tether-extreme</span>
+./mooch.sh check</div>
+        <div class="expect">
+          <span class="k">Expect — the bolded line is the whole fix</span>
+          <label class="chk"><input type="checkbox"><span>transport <b>✓</b> — exit IP <code>172.56.x</code> → PHONE 📱</span></label>
+          <label class="chk"><input type="checkbox"><span>DNS <b>✓</b> — names resolve</span></label>
+          <label class="chk"><input type="checkbox"><span><code>primary resolver : 1.1.1.1 (mooch's tunnel DNS ✓)</code> &nbsp;← was <code>100.100.100.100</code></span></label>
+          <label class="chk"><input type="checkbox"><span><code>raw 1.1.1.1 test : ✓</code></span></label>
+        </div>
+      </li>
+
+      <li>
+        <h3>Real-world confirm — open a browser</h3>
+        <p class="hint">Go to a site you <em>haven't</em> visited recently (fresh DNS, no cache), e.g. a random news site. It should just load — Chrome included, no proxy settings.</p>
+      </li>
+
+      <li>
+        <h3>Stop &amp; return to normal</h3>
+        <p class="hint">Ctrl+C in Terminal A → turn Wi-Fi back on.</p>
+        <div class="cmd">./mooch.sh check&nbsp;&nbsp;<span class="c"># should read State 1 again</span></div>
+        <div class="expect">
+          <span class="k">Expect</span>
+          <label class="chk"><input type="checkbox"><span>exit back to Wi-Fi <code>96.232.x</code> 🛜</span></label>
+          <label class="chk"><input type="checkbox"><span>resolver back to <code>100.100.100.100</code> (Tailscale restored)</span></label>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============ SAFETY ============ -->
+  <section>
+    <h2><span class="num">05</span> If anything feels stuck</h2>
+    <p class="sub">In rough order. You cannot brick yourself out — the last one always works.</p>
+    <div class="safety">
+      <div class="box"><b>tail -f /tmp/mooch.log</b><p>Watch exactly what mooch is doing, live, in a spare window.</p></div>
+      <div class="box"><b>sudo ./mooch.sh dns-reset</b><p>Names won't resolve? This un-sticks DNS: clears the override, DHCP back, Tailscale DNS on.</p></div>
+      <div class="box"><b>sudo ./mooch.sh panic</b><p>Force-remove everything — tunnel, routes, DNS, proxies — from any window.</p></div>
+      <div class="box"><b>Reboot</b><p>The guaranteed reset. Routing and the DNS override are gone on restart, always.</p></div>
+    </div>
+    <p style="margin-top:16px; font-size:0.84rem; color:var(--ink-faint)">One honest caveat: Tailscale's paused-DNS pref is the single thing that outlives a reboot. If mooch ever crashes mid-run, a plain <code>sudo ./mooch.sh dns-reset</code> (or <code>tailscale set --accept-dns=true</code>) puts it right.</p>
+  </section>
+
+  <p class="foot">mooch.sh · transparent/uplink mode · phone = uplink, not proxy · /tmp/mooch.log</p>
+
+</div>
+</body>
+</html>

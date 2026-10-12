@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proxy vs. Uplink</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔌</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+  :root {
+    --ground:    #eef0f3;
+    --surface:   #f8f9fb;
+    --surface-2: #e6e9ee;
+    --hairline:  #d3d8e0;
+    --ink:       #16202b;
+    --ink-soft:  #46525f;
+    --ink-faint: #6b7784;
+    --amber:     #b9791a;   /* the phone / carrier path */
+    --amber-bg:  #f6ead2;
+    --teal:      #12796e;   /* traffic flowing / it works */
+    --teal-bg:   #d9ece9;
+    --red:       #c23b31;   /* leaked / doesn't work */
+    --red-bg:    #f6dcd9;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #0f1720;
+      --surface:   #16202c;
+      --surface-2: #1e2a38;
+      --hairline:  #2a3947;
+      --ink:       #e6ebf1;
+      --ink-soft:  #a7b4c2;
+      --ink-faint: #6f8091;
+      --amber:     #e6a038;
+      --amber-bg:  #2a2416;
+      --teal:      #3fc0b0;
+      --teal-bg:   #12292a;
+      --red:       #e8675c;
+      --red-bg:    #2c1a1a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0f1720; --surface:#16202c; --surface-2:#1e2a38; --hairline:#2a3947;
+    --ink:#e6ebf1; --ink-soft:#a7b4c2; --ink-faint:#6f8091;
+    --amber:#e6a038; --amber-bg:#2a2416; --teal:#3fc0b0; --teal-bg:#12292a;
+    --red:#e8675c; --red-bg:#2c1a1a;
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 40px 22px 64px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem; font-weight: 500;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--amber); margin: 0;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(1.55rem, 4.4vw, 2.3rem);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 12px 0 0;
+  }
+  .lede {
+    font-size: clamp(1rem, 2.2vw, 1.12rem);
+    color: var(--ink-soft);
+    max-width: 58ch;
+    margin: 14px 0 0;
+  }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  /* ---- two panels ---- */
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 36px;
+  }
+  @media (max-width: 720px) { .panels { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 20px 20px 22px;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel.uplink { border-color: color-mix(in srgb, var(--teal) 45%, var(--hairline)); }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.64rem; font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 999px;
+    align-self: flex-start;
+  }
+  .tag.a { color: var(--red);  background: var(--red-bg); }
+  .tag.b { color: var(--teal); background: var(--teal-bg); }
+
+  .panel h2 {
+    font-size: 1.12rem; font-weight: 650;
+    margin: 12px 0 2px; letter-spacing: -0.01em;
+  }
+  .panel .sub { font-size: 0.9rem; color: var(--ink-faint); margin: 0 0 16px; }
+
+  .zone-label {
+    font-family: var(--mono);
+    font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 4px 0 8px;
+  }
+
+  /* ---- app chips ---- */
+  .apps { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.78rem; font-weight: 500;
+    padding: 6px 10px; border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    color: var(--ink);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .chip .mk { font-weight: 700; }
+  .chip.ok  .mk { color: var(--teal); }
+  .chip.no  .mk { color: var(--red); }
+  .chip.no  { color: var(--ink-faint); }
+  .chip.plain { color: var(--ink); }
+
+  /* ---- connector ---- */
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; margin: 4px 0; }
+  .arrow { width: 2px; height: 22px; background: var(--hairline); }
+  .arrow.live { background: var(--teal); }
+  .chev { color: var(--ink-faint); font-size: 0.9rem; line-height: 1; margin-top: -4px; }
+  .chev.live { color: var(--teal); }
+
+  /* ---- outcome split (panel A) ---- */
+  .split { display: flex; gap: 10px; margin-top: 6px; }
+  .outcome {
+    flex: 1; text-align: center;
+    border-radius: 10px; padding: 12px 8px;
+    font-family: var(--mono); font-size: 0.74rem; font-weight: 500;
+    border: 1px dashed var(--hairline);
+  }
+  .outcome.good { color: var(--teal); background: var(--teal-bg);
+    border-style: solid; border-color: color-mix(in srgb, var(--teal) 40%, transparent); }
+  .outcome.bad  { color: var(--red); background: var(--red-bg);
+    border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+  .outcome .big { display: block; font-size: 1.15rem; font-weight: 700; margin-bottom: 3px; }
+
+  /* ---- pipeline (panel B) ---- */
+  .pipe { display: flex; flex-direction: column; gap: 0; align-items: stretch; margin-top: 2px; }
+  .stage {
+    position: relative;
+    border-radius: 10px;
+    padding: 11px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--hairline);
+    overflow: hidden;
+  }
+  .stage .role {
+    font-family: var(--mono); font-size: 0.66rem; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--teal);
+  }
+  .stage .name { font-size: 0.92rem; font-weight: 600; margin-top: 1px; }
+  .stage .name small { color: var(--ink-faint); font-weight: 400; }
+  .stage.phone { background: var(--amber-bg); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+  .stage.phone .role { color: var(--amber); }
+  .link { width: 2px; height: 16px; background: var(--teal); align-self: center; }
+  .pulse {
+    position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, var(--teal), transparent);
+    opacity: 0.85;
+    animation: sweep 2.6s ease-in-out infinite;
+  }
+  @keyframes sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .pulse { display: none; } }
+
+  .catch {
+    margin-top: 14px;
+    font-size: 0.86rem; color: var(--ink-soft);
+  }
+  .catch b { color: var(--ink); }
+
+  /* ---- key + takeaway ---- */
+  .key {
+    margin-top: 26px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 16px 20px;
+    display: flex; flex-wrap: wrap; gap: 20px;
+  }
+  .key .row { display: flex; align-items: baseline; gap: 9px; font-size: 0.9rem; color: var(--ink-soft); }
+  .key .term {
+    font-family: var(--mono); font-weight: 700; font-size: 0.82rem;
+    color: var(--ink); padding: 2px 7px; border-radius: 6px;
+    background: var(--surface-2); border: 1px solid var(--hairline);
+  }
+  .key b { color: var(--ink); }
+
+  .takeaway {
+    margin-top: 22px;
+    font-size: 1.02rem; color: var(--ink);
+    border-left: 3px solid var(--teal);
+    padding: 4px 0 4px 16px;
+    max-width: 62ch;
+  }
+  .takeaway b { color: var(--teal); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Getting the Mac online through the phone</p>
+    <h1>Two ways to borrow the phone's internet</h1>
+    <p class="lede">Same goal either way — your Mac gets online through the phone over the USB cable. The real difference is <b>who has to know about it</b>: every app, or nobody.</p>
+  </header>
+
+  <div class="panels">
+
+    <!-- ============ PANEL A: PROXY ============ -->
+    <section class="panel now">
+      <span class="tag a">Now · proxy mode</span>
+      <h2>You tell each app, one by one</h2>
+      <p class="sub">Like walking desk to desk asking each person to write the phone's address on their mail.</p>
+
+      <p class="zone-label">Your apps</p>
+      <div class="apps">
+        <span class="chip ok"><span class="mk">✓</span>Firefox</span>
+        <span class="chip no"><span class="mk">✗</span>Chrome</span>
+        <span class="chip ok"><span class="mk">✓</span>this Terminal</span>
+        <span class="chip no"><span class="mk">✗</span>new Terminal</span>
+        <span class="chip no"><span class="mk">✗</span>Slack</span>
+      </div>
+
+      <div class="flow">
+        <div class="arrow"></div>
+        <div class="chev">▽</div>
+      </div>
+
+      <div class="split">
+        <div class="outcome good"><span class="big">✓</span>the ones you set up<br>reach the phone</div>
+        <div class="outcome bad"><span class="big">✗</span>the rest quietly<br>slip out over Wi-Fi</div>
+      </div>
+
+      <p class="catch">The catch: <b>you have to configure every app</b>, stubborn ones (Chrome) ignore you, and a new window forgets the setting. Miss one and it leaks onto normal Wi-Fi without telling you.</p>
+    </section>
+
+    <!-- ============ PANEL B: UPLINK ============ -->
+    <section class="panel uplink">
+      <span class="tag b">Option 2 · uplink mode</span>
+      <h2>One checkpoint catches everything</h2>
+      <p class="sub">Leave everyone alone. Put one clerk at the exit who re-routes every letter through the phone.</p>
+
+      <p class="zone-label">Your apps — untouched, all just normal</p>
+      <div class="apps">
+        <span class="chip plain">Firefox</span>
+        <span class="chip plain">Chrome</span>
+        <span class="chip plain">Terminal</span>
+        <span class="chip plain">Slack</span>
+        <span class="chip plain">everything</span>
+      </div>
+
+      <div class="flow">
+        <div class="arrow live"></div>
+        <div class="chev live">▽</div>
+      </div>
+
+      <div class="pipe">
+        <div class="stage"><span class="pulse"></span>
+          <div class="role">The doorway · pf</div>
+          <div class="name">Catches <small>every request leaving the Mac</small></div>
+        </div>
+        <div class="link"></div>
+        <div class="stage"><span class="pulse"></span>
+          <div class="role">The clerk · redsocks</div>
+          <div class="name">Hands each one <small>to the phone over USB</small></div>
+        </div>
+        <div class="link"></div>
+        <div class="stage phone">
+          <div class="role">The phone · 4G</div>
+          <div class="name">Sends it out <small>on the uncapped on-device data</small></div>
+        </div>
+      </div>
+
+      <p class="catch"><b>No app is configured.</b> They don't even know the road changed. Every window, every new terminal, Chrome included — all covered automatically.</p>
+    </section>
+
+  </div>
+
+  <!-- ============ KEY ============ -->
+  <div class="key">
+    <div class="row"><span class="term">pf</span><span>macOS's built-in traffic controller — the <b>doorway</b> that catches every request on its way out.</span></div>
+    <div class="row"><span class="term">redsocks</span><span>a small helper you install — the <b>clerk</b> that actually hands each request to the phone.</span></div>
+  </div>
+
+  <p class="takeaway">The whole idea in one line: proxy mode <b>configures each app</b>; uplink mode <b>changes the shared road</b>. Apps can't be stubborn about a road they don't know they're on — so the only thing that changes is where the internet comes from.</p>
+
+</div>
+</body>
+</html>
