@@ -17,7 +17,7 @@
 #include <unistd.h>
 #include <SystemConfiguration/SystemConfiguration.h>
 
-#define SERVICE_ID  "mooch-uplink"
+#define SERVICE_ID  "macdroid"
 #define MATCH_ORDER 100     // lower wins; Tailscale sits around 101400
 
 static volatile sig_atomic_t running = 1;

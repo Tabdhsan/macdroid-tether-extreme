@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Phone Uplink</title>
-<meta name="description" content="How uplink.sh gives a Mac the phone's own mobile data over USB, without hotspot or tethering.">
+<title>MacDroid</title>
+<meta name="description" content="How macdroid.sh gives a Mac the phone's own mobile data over USB, without hotspot or tethering.">
 <style>
   :root {
     --ground: #eef0f3; --surface: #f8f9fb; --surface-2: #e6e9ee; --hairline: #d3d8e0;
@@ -93,7 +93,7 @@
 </head>
 <body>
 <div class="wrap">
-  <p class="eyebrow">macdroid-tether-extreme · uplink.sh</p>
+  <p class="eyebrow">MacDroid · macdroid.sh</p>
   <h1>The phone's own data, on your Mac, over a cable</h1>
   <p class="lede">Every app on the Mac uses the phone's <b>mobile data</b> through the USB cable. Hotspot and USB tethering aren't involved, so it isn't counted as hotspot. TCP and UDP both work, and it cleans up after itself even if something crashes.</p>
 
@@ -184,7 +184,7 @@
       <div class="card tile">
         <span class="tag blue">Wi-Fi optional</span>
         <h3>macOS treats it as the real connection</h3>
-        <p>A tiny helper makes the uplink the first-choice DNS and the <b>primary</b> connection. With Wi-Fi off, apps don't decide you're offline, and turning Wi-Fi on or off can't take the route back.</p>
+        <p>A tiny helper makes MacDroid the first-choice DNS and the <b>primary</b> connection. With Wi-Fi off, apps don't decide you're offline, and turning Wi-Fi on or off can't take the route back.</p>
       </div>
     </div>
   </section>
@@ -204,7 +204,7 @@
         </tbody>
       </table>
     </div>
-    <p class="sub" style="margin-top:12px">Billing is still the carrier's call. Deep inspection could spot that the content comes from a Mac. The final word is your carrier's hotspot-usage counter: note it, use the uplink, and check that it hasn't moved.</p>
+    <p class="sub" style="margin-top:12px">Billing is still the carrier's call. Deep inspection could spot that the content comes from a Mac. The final word is your carrier's hotspot-usage counter: note it, use MacDroid, and check that it hasn't moved.</p>
   </section>
 
   <section>
@@ -239,16 +239,16 @@
     <h2><span class="n">06</span>Using it</h2>
     <p class="sub">The password is needed once, for install. On/off after that needs none, from the terminal or Raycast.</p>
 <pre class="cmd"><span class="c"># once</span>
-./uplink.sh setup            <span class="c"># fetch sing-box, build helper, copy to phone</span>
-sudo ./uplink.sh install     <span class="c"># launchd job + passwordless start/stop</span>
+./macdroid.sh setup            <span class="c"># fetch sing-box, build helper, copy to phone</span>
+sudo ./macdroid.sh install     <span class="c"># launchd job + passwordless start/stop</span>
 
 <span class="c"># day to day — no sudo</span>
-./uplink.sh toggle           <span class="c"># or Raycast: "Phone Uplink Toggle"</span>
-./uplink.sh status           <span class="c"># 📱 Phone uplink ON · 140ms · exit 172.56.x.x</span>
-./uplink.sh check            <span class="c"># exit IP, DNS, UDP, primary, MagicDNS</span></pre>
+./macdroid.sh toggle           <span class="c"># or Raycast: "MacDroid Toggle"</span>
+./macdroid.sh status           <span class="c"># 📱 MacDroid ON · 140ms · exit 172.56.x.x</span>
+./macdroid.sh check            <span class="c"># exit IP, DNS, UDP, primary, MagicDNS</span></pre>
   </section>
 
-  <footer>uplink.sh · sing-box 1.14.3 on both ends · tested on Galaxy Z Flip6, Android 16, T-Mobile</footer>
+  <footer>macdroid.sh · sing-box 1.14.3 on both ends · tested on Galaxy Z Flip6, Android 16, T-Mobile</footer>
 </div>
 </body>
 </html>

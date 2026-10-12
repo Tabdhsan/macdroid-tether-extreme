@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# uplink.sh — use the phone's ON-DEVICE data as the Mac's internet, over USB.
+# macdroid.sh — MacDroid: use the phone's ON-DEVICE data as the Mac's internet, over USB.
 #
-#   ./uplink.sh setup          one-time: fetch sing-box, build dnshold, push to phone
-#   sudo ./uplink.sh install   one-time: install as a launchd job + passwordless on/off
-#   ./uplink.sh toggle|start|stop|status    day to day — no sudo (Raycast uses these)
-#   ./uplink.sh check          what's working right now, and why not (no sudo)
-#   sudo ./uplink.sh up        foreground mode for debugging (Ctrl+C = off)
-#   sudo ./uplink.sh down      force teardown from any terminal
+#   ./macdroid.sh setup          one-time: fetch sing-box, build dnshold, push to phone
+#   sudo ./macdroid.sh install   one-time: install as a launchd job + passwordless on/off
+#   ./macdroid.sh toggle|start|stop|status    day to day — no sudo (Raycast uses these)
+#   ./macdroid.sh check          what's working right now, and why not (no sudo)
+#   sudo ./macdroid.sh up        foreground mode for debugging (Ctrl+C = off)
+#   sudo ./macdroid.sh down      force teardown from any terminal
 #
-# How it works (see uplink/README section in README.md):
+# How it works (more in README.md and how-it-works.html):
 #
 #   Mac apps ─▶ utun225 (sing-box tun) ─▶ SOCKS5 + UDP-over-TCP ─▶ adb forward
 #            ─▶ USB ─▶ phone: sing-box SOCKS server run by `adb shell` ─▶ cellular
@@ -39,7 +39,7 @@ fi
 SB_VERSION=1.14.3
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$HERE/bin"
-ASSETS="$HERE/uplink"
+ASSETS="$HERE/macdroid"
 SB_MAC="$BIN/sing-box-darwin"
 SB_PHONE_LOCAL="$BIN/sing-box-android"
 DNSHOLD="$ASSETS/dnshold"
@@ -47,38 +47,38 @@ MAC_CFG="$ASSETS/mac.json"
 PHONE_CFG="$ASSETS/phone.json"
 
 PHONE_DIR=/data/local/tmp
-PHONE_BIN=$PHONE_DIR/mooch-sb
-PHONE_JSON=$PHONE_DIR/mooch-sb.json
-PHONE_PAT="mooch-s[b] run"   # bracket: never matches the adb wrapper shell itself
+PHONE_BIN=$PHONE_DIR/macdroid-sb
+PHONE_JSON=$PHONE_DIR/macdroid-sb.json
+PHONE_PAT="macdroid-s[b] run"   # bracket: never matches the adb wrapper shell itself
 PHONE_PORT=1090          # phone.json listen_port (phone localhost only)
 LOCAL_PORT=8901          # mac.json phone outbound server_port
 TUN_DEV=utun225          # mac.json interface_name
 TUN_IP=172.19.0.1
 TUN_DNS=172.19.0.2       # hijacked by sing-box (next address after TUN_IP)
 
-STATE=/tmp/mooch-uplink
-LOG=/tmp/mooch-uplink.log
+STATE=/tmp/macdroid
+LOG=/tmp/macdroid.log
 
 # installed (launchd) mode — see cmd_install
-LABEL=com.mooch.uplink
-INSTALL_DIR=/Library/PrivilegedHelperTools/mooch-uplink
+LABEL=com.macdroid
+INSTALL_DIR=/Library/PrivilegedHelperTools/macdroid
 PLIST=/Library/LaunchDaemons/$LABEL.plist
-SUDOERS=/etc/sudoers.d/mooch-uplink
-JOB_OUT=/tmp/mooch-uplink.out
+SUDOERS=/etc/sudoers.d/macdroid
+JOB_OUT=/tmp/macdroid.out
 PROBE_TMO=6
 HEALTH_IV=15
 
-ADB_BIN="${UPLINK_ADB:-$(command -v adb 2>/dev/null || echo /opt/homebrew/bin/adb)}"
+ADB_BIN="${MACDROID_ADB:-$(command -v adb 2>/dev/null || echo /opt/homebrew/bin/adb)}"
 TS_BIN="$(command -v tailscale 2>/dev/null)"
 for _t in /usr/local/bin/tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
   [ -z "$TS_BIN" ] && [ -x "$_t" ] && TS_BIN=$_t
 done
 
-# When root, run user-owned tools as the real user (UPLINK_USER under launchd,
+# When root, run user-owned tools as the real user (MACDROID_USER under launchd,
 # SUDO_USER under sudo). adb then also shares the user's adb server instead of
 # starting a second, root-owned one on the same port.
 as_user() {
-  local u="${UPLINK_USER:-${SUDO_USER:-}}"
+  local u="${MACDROID_USER:-${SUDO_USER:-}}"
   if [ "$(id -u)" = 0 ] && [ -n "$u" ]; then
     sudo -u "$u" -H "$@"
   else
@@ -183,12 +183,13 @@ cmd_setup() {
   phone_on || die "no phone on adb — enable USB debugging, plug in, accept the prompt, re-run setup"
   push_phone && echo "✓ phone ready ($PHONE_BIN)"
   echo
-  echo "next:  sudo ./uplink.sh install    (once; then ./uplink.sh toggle or Raycast — no sudo)"
+  echo "next:  sudo ./macdroid.sh install    (once; then ./macdroid.sh toggle or Raycast — no sudo)"
 }
 
 # copy binary/config to the phone only if they differ
 push_phone() {
   local want have
+  adb shell "rm -f $PHONE_DIR/mooch-sb $PHONE_DIR/mooch-sb.json" >/dev/null 2>&1   # pre-rename leftovers
   want=$(shasum -a 256 "$SB_PHONE_LOCAL" | awk '{print $1}')
   have=$(adb shell "sha256sum $PHONE_BIN 2>/dev/null" | tr -d '\r' | awk '{print $1}')
   if [ "$want" != "$have" ]; then
@@ -240,15 +241,15 @@ cleanup() {
   rm -rf "$STATE"
   log "teardown complete"
   echo
-  echo "✓ uplink OFF — Mac is back on its normal network"
+  echo "✓ MacDroid OFF — Mac is back on its normal network"
 }
 
 cmd_up() {
-  [ "$(id -u)" = 0 ] || die "needs root:  sudo ./uplink.sh up"
-  [ -x "$SB_MAC" ] && [ -x "$DNSHOLD" ] || die "not set up — run:  ./uplink.sh setup"
-  [ -d "$STATE" ] && pgrep -f "$SB_MAC run" >/dev/null && die "already running (or run: sudo ./uplink.sh down)"
+  [ "$(id -u)" = 0 ] || die "needs root:  sudo ./macdroid.sh up"
+  [ -x "$SB_MAC" ] && [ -x "$DNSHOLD" ] || die "not set up — run:  ./macdroid.sh setup"
+  [ -d "$STATE" ] && pgrep -f "$SB_MAC run" >/dev/null && die "already running (or run: sudo ./macdroid.sh down)"
   phone_on || die "no phone on adb — plug in + enable USB debugging"
-  ifconfig "$TUN_DEV" >/dev/null 2>&1 && die "$TUN_DEV already exists — something else owns it (try: sudo ./uplink.sh down)"
+  ifconfig "$TUN_DEV" >/dev/null 2>&1 && die "$TUN_DEV already exists — something else owns it (try: sudo ./macdroid.sh down)"
 
   rm -rf "$STATE"; mkdir -p "$STATE"
   # trap FIRST, before anything is changed, so Ctrl+C at any point is clean
@@ -296,9 +297,13 @@ cmd_up() {
   : > "$STATE/ready"       # `start` waits for this
   echo
   echo "════════════════════════════════════════════════════════════════"
-  echo "  UPLINK ON — the Mac is using the phone's on-device data"
-  echo "  this window IS the switch: Ctrl+C restores everything"
-  echo "  other terminal:  ./uplink.sh check      log: tail -f $LOG"
+  echo "  MACDROID ON — the Mac is using the phone's on-device data"
+  if [ -n "${MACDROID_USER:-}" ]; then
+    echo "  running under launchd — turn off with: ./macdroid.sh stop (or Raycast)"
+  else
+    echo "  this window IS the switch: Ctrl+C restores everything"
+  fi
+  echo "  other terminal:  ./macdroid.sh check      log: tail -f $LOG"
   echo "════════════════════════════════════════════════════════════════"
 
   # 5) hold: supervise, self-heal the phone side on re-plug, report changes
@@ -360,7 +365,7 @@ verify_line() {
 }
 
 cmd_down() {
-  [ "$(id -u)" = 0 ] || die "needs root:  sudo ./uplink.sh down"
+  [ "$(id -u)" = 0 ] || die "needs root:  sudo ./macdroid.sh down"
   cleanup
 }
 
@@ -375,20 +380,36 @@ cmd_down() {
 # Re-run install after changing anything in the repo.
 
 cmd_install() {
-  [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ] || die "run:  sudo ./uplink.sh install"
+  [ "$(id -u)" = 0 ] && [ -n "${SUDO_USER:-}" ] || die "run:  sudo ./macdroid.sh install"
   local f
   for f in "$SB_MAC" "$SB_PHONE_LOCAL" "$DNSHOLD"; do
-    [ -x "$f" ] || die "missing $f — run ./uplink.sh setup first (without sudo)"
+    [ -x "$f" ] || die "missing $f — run ./macdroid.sh setup first (without sudo)"
   done
   [ "$(stat -f %Su "$(dirname "$INSTALL_DIR")")" = root ] || die "$(dirname "$INSTALL_DIR") isn't root-owned; refusing"
 
+  # if it's on right now (old or current install), bring it back up afterwards
+  local was_on=0; tun_up && was_on=1
+  [ "$was_on" = 1 ] && echo "↪ MacDroid is on — it will drop for ~15s and come back after the install"
+
+  # migrate from the pre-rename install ("uplink", com.mooch.uplink)
+  if [ -e /Library/LaunchDaemons/com.mooch.uplink.plist ] || [ -e /etc/sudoers.d/mooch-uplink ]; then
+    echo "↪ removing the old 'uplink' install"
+    launchctl kill TERM system/com.mooch.uplink >/dev/null 2>&1
+    launchctl bootout system/com.mooch.uplink >/dev/null 2>&1
+    rm -f /Library/LaunchDaemons/com.mooch.uplink.plist /etc/sudoers.d/mooch-uplink
+    rm -rf /Library/PrivilegedHelperTools/mooch-uplink
+  fi
+
+  launchctl kill TERM "system/$LABEL" >/dev/null 2>&1
+  local i
+  for i in $(seq 1 30); do tun_up || break; sleep 0.5; done
   launchctl bootout "system/$LABEL" >/dev/null 2>&1
   rm -rf "$INSTALL_DIR"
-  mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/uplink"
-  install -m 755 "$HERE/uplink.sh" "$INSTALL_DIR/uplink.sh"
+  mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/macdroid"
+  install -m 755 "$HERE/macdroid.sh" "$INSTALL_DIR/macdroid.sh"
   install -m 755 "$SB_MAC" "$SB_PHONE_LOCAL" "$INSTALL_DIR/bin/"
-  install -m 755 "$DNSHOLD" "$INSTALL_DIR/uplink/"
-  install -m 644 "$MAC_CFG" "$PHONE_CFG" "$INSTALL_DIR/uplink/"
+  install -m 755 "$DNSHOLD" "$INSTALL_DIR/macdroid/"
+  install -m 644 "$MAC_CFG" "$PHONE_CFG" "$INSTALL_DIR/macdroid/"
   chown -R root:wheel "$INSTALL_DIR"; chmod 755 "$INSTALL_DIR"
 
   cat > "$PLIST" <<EOF
@@ -398,11 +419,11 @@ cmd_install() {
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>/bin/bash</string><string>$INSTALL_DIR/uplink.sh</string><string>up</string></array>
+  <array><string>/bin/bash</string><string>$INSTALL_DIR/macdroid.sh</string><string>up</string></array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>UPLINK_USER</key><string>$SUDO_USER</string>
-    <key>UPLINK_ADB</key><string>$ADB_BIN</string>
+    <key>MACDROID_USER</key><string>$SUDO_USER</string>
+    <key>MACDROID_ADB</key><string>$ADB_BIN</string>
   </dict>
   <key>RunAtLoad</key><false/>
   <key>KeepAlive</key><false/>
@@ -424,60 +445,66 @@ EOF
   echo "✓ installed to $INSTALL_DIR"
   echo "✓ launchd job $LABEL (starts only when you turn it on)"
   echo "✓ passwordless on/off for $SUDO_USER (only: start/stop this job)"
+  if [ "$was_on" = 1 ]; then
+    echo "↪ turning MacDroid back on…"
+    launchctl kickstart "system/$LABEL"
+    for i in $(seq 1 60); do [ -f "$STATE/ready" ] && break; sleep 0.5; done
+    echo "  $(status_line)"
+  fi
   echo
-  echo "now:  ./uplink.sh toggle     — or the Raycast 'Phone Uplink' commands"
+  echo "now:  ./macdroid.sh toggle     — or the Raycast 'MacDroid' commands"
 }
 
 cmd_uninstall() {
-  [ "$(id -u)" = 0 ] || die "run:  sudo ./uplink.sh uninstall"
+  [ "$(id -u)" = 0 ] || die "run:  sudo ./macdroid.sh uninstall"
   launchctl kill TERM "system/$LABEL" >/dev/null 2>&1; sleep 2
   launchctl bootout "system/$LABEL" >/dev/null 2>&1
   rm -f "$PLIST" "$SUDOERS"; rm -rf "$INSTALL_DIR"
   echo "✓ uninstalled (launchd job, sudoers rule and $INSTALL_DIR removed)"
 }
 
-job_running() { pgrep -f "$INSTALL_DIR/uplink.sh up" >/dev/null 2>&1; }
+job_running() { pgrep -f "$INSTALL_DIR/macdroid.sh up" >/dev/null 2>&1; }
 tun_up()      { ifconfig "$TUN_DEV" >/dev/null 2>&1; }
 
 # one line, fast — what Raycast shows
 status_line() {
   if tun_up; then
     local t; t=$(p_transport)
-    if [ -n "$t" ]; then echo "📱 Phone uplink ON · ${t##* }ms · exit ${t%% *}"
-    else echo "⚠️ Phone uplink ON but no internet — $(why_down)"; fi
+    if [ -n "$t" ]; then echo "📱 MacDroid ON · ${t##* }ms · exit ${t%% *}"
+    else echo "⚠️ MacDroid ON but no internet — $(why_down)"; fi
   elif job_running; then
-    echo "⏳ Phone uplink starting…"
+    echo "⏳ MacDroid starting…"
   else
-    echo "⚪ Phone uplink OFF"
+    echo "⚪ MacDroid OFF"
   fi
 }
 
 cmd_start() {
-  [ -x "$INSTALL_DIR/uplink.sh" ] || die "not installed — run:  sudo ./uplink.sh install"
+  [ -x "$INSTALL_DIR/macdroid.sh" ] || die "not installed — run:  sudo ./macdroid.sh install"
   if tun_up; then status_line; return 0; fi
   phone_on || { echo "📵 Phone not on adb — plug in, USB debugging on"; return 1; }
   sudo -n /bin/launchctl kickstart "system/$LABEL" 2>/dev/null \
-    || { echo "✗ couldn't start the job — re-run:  sudo ./uplink.sh install"; return 1; }
+    || { echo "✗ couldn't start the job — re-run:  sudo ./macdroid.sh install"; return 1; }
   local i
   for i in $(seq 1 60); do
     [ -f "$STATE/ready" ] && { status_line; return 0; }
     [ "$i" -gt 6 ] && ! job_running && break
     sleep 0.5
   done
-  echo "✗ uplink didn't come up: $(grep -E '✗|⚠' "$JOB_OUT" 2>/dev/null | tail -n 1)"
+  echo "✗ MacDroid didn't come up: $(grep -E '✗|⚠' "$JOB_OUT" 2>/dev/null | tail -n 1)"
   return 1
 }
 
 cmd_stop() {
-  if ! tun_up && ! job_running; then echo "⚪ Phone uplink OFF"; return 0; fi
+  if ! tun_up && ! job_running; then echo "⚪ MacDroid OFF"; return 0; fi
   sudo -n /bin/launchctl kill TERM "system/$LABEL" 2>/dev/null \
-    || { echo "✗ couldn't stop it (started by hand?) — run:  sudo ./uplink.sh down"; return 1; }
+    || { echo "✗ couldn't stop it (started by hand?) — run:  sudo ./macdroid.sh down"; return 1; }
   local i
   for i in $(seq 1 30); do
-    tun_up || { echo "⚪ Phone uplink OFF — back on your normal network"; return 0; }
+    tun_up || { echo "⚪ MacDroid OFF — back on your normal network"; return 0; }
     sleep 0.5
   done
-  echo "✗ still up — run:  sudo ./uplink.sh down"; return 1
+  echo "✗ still up — run:  sudo ./macdroid.sh down"; return 1
 }
 
 cmd_toggle() { if tun_up || job_running; then cmd_stop; else cmd_start; fi; }
@@ -488,7 +515,7 @@ cmd_check() {
   local running=no
   ifconfig "$TUN_DEV" >/dev/null 2>&1 && running=yes
   echo "── state ──"
-  echo "  uplink running : $running   (internet route via $(route_if 1.2.3.4); LAN via $(route_if 192.168.1.1))"
+  echo "  MacDroid on    : $running   (internet route via $(route_if 1.2.3.4); LAN via $(route_if 192.168.1.1))"
   echo "  resolver #1    : $(resolver1)"
   if phone_on; then
     echo "  phone          : on adb, uplink $(p_phone_uplink), server $([ -n "$(p_phone_ip)" ] && echo answering || echo 'not answering')"

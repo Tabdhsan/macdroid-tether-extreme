@@ -1,6 +1,6 @@
-# downloaded sing-box binaries + built helper (recreated by ./uplink.sh setup)
+# downloaded sing-box binaries + built helper (recreated by ./macdroid.sh setup)
 bin/
-uplink/dnshold
+macdroid/dnshold
 
 # macOS
 .DS_Store
