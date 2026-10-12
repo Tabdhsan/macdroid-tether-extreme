@@ -289,12 +289,12 @@ cmd_up() {
   kill -0 "$(cat "$STATE/dnshold.pid")" 2>/dev/null || { echo "✗ dnshold failed:"; cat "$STATE/dnshold.log"; exit 1; }
   dscacheutil -flushcache; killall -HUP mDNSResponder 2>/dev/null
   say "✓ DNS → $TUN_DNS (answered by sing-box over DoH through the phone)${suffix:+; tailnet names → 100.100.100.100}"
+  : > "$STATE/ready"       # usable now; `start` returns on this (the self-test below takes ~10s more)
 
   # 4) verify
   sleep 2
   echo
   verify_line
-  : > "$STATE/ready"       # `start` waits for this
   echo
   echo "════════════════════════════════════════════════════════════════"
   echo "  MACDROID ON — the Mac is using the phone's on-device data"
@@ -491,7 +491,9 @@ cmd_start() {
     [ "$i" -gt 6 ] && ! job_running && break
     sleep 0.5
   done
-  echo "✗ MacDroid didn't come up: $(grep -E '✗|⚠' "$JOB_OUT" 2>/dev/null | tail -n 1)"
+  if job_running; then echo "⏳ MacDroid is still starting — check the MacDroid status in a few seconds"; return 0; fi
+  local why; why=$(grep -E '✗' "$JOB_OUT" 2>/dev/null | tail -n 1)
+  echo "✗ MacDroid stopped before it came up${why:+ — $why} (log: $JOB_OUT)"
   return 1
 }
 
@@ -507,7 +509,11 @@ cmd_stop() {
   echo "✗ still up — run:  sudo ./macdroid.sh down"; return 1
 }
 
-cmd_toggle() { if tun_up || job_running; then cmd_stop; else cmd_start; fi; }
+# a second press while it's still starting must not cancel the start
+cmd_toggle() {
+  if job_running && [ ! -f "$STATE/ready" ]; then echo "⏳ MacDroid is still starting…"; return 0; fi
+  if tun_up || job_running; then cmd_stop; else cmd_start; fi
+}
 
 # ----------------------------------------------------------------- check ----
 
