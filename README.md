@@ -125,7 +125,9 @@ Nothing outlives the processes that own it:
 - **The phone server** runs inside an `adb shell` session and dies with it.
 - **Tailscale** settings are never touched.
 
-A reboot is never needed to recover. If the cable is unplugged and plugged back in, the phone side restarts on its own within a few seconds.
+A reboot is never needed to recover.
+
+**Unplugging:** if you plug the phone back in within 15 seconds, the phone side restarts on its own and MacDroid stays on. If the phone stays unplugged longer, MacDroid turns itself off (the same clean teardown), so the Mac falls back to Wi-Fi rather than routing into a dead tunnel. Change the window with `UNPLUG_GRACE` in `macdroid.sh`.
 
 Logs: `/tmp/macdroid.log` for events, and `/tmp/macdroid.out` for the launchd job's output. While running, per-process logs are in `/tmp/macdroid/`.
 

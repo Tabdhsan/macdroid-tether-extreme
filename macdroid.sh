@@ -67,6 +67,7 @@ SUDOERS=/etc/sudoers.d/macdroid
 JOB_OUT=/tmp/macdroid.out
 PROBE_TMO=6
 HEALTH_IV=15
+UNPLUG_GRACE=15         # phone gone this long (seconds) → MacDroid turns itself off
 
 ADB_BIN="${MACDROID_ADB:-$(command -v adb 2>/dev/null || echo /opt/homebrew/bin/adb)}"
 TS_BIN="$(command -v tailscale 2>/dev/null)"
@@ -145,13 +146,16 @@ p_phone_uplink() {
 
 route_if() { route -n get "${1:-1.2.3.4}" 2>/dev/null | awk '/interface:/{print $2}'; }
 resolver1() { scutil --dns 2>/dev/null | awk '/^resolver #1/{f=1} f&&/nameserver\[0\]/{print $3; exit}'; }
+# `tailscale status` can block for minutes while the network is changing under
+# it (seen right after the tun comes up with Wi-Fi off); never let it stall `up`.
+ts_status() { as_user /usr/bin/perl -e 'alarm shift; exec @ARGV' 3 "$TS_BIN" status --json 2>/dev/null; }
 tailnet_suffix() {
   [ -n "$TS_BIN" ] || return
-  as_user "$TS_BIN" status --json 2>/dev/null | /usr/bin/jq -r '.MagicDNSSuffix // empty' 2>/dev/null
+  ts_status | /usr/bin/jq -r '.MagicDNSSuffix // empty' 2>/dev/null
 }
 tailnet_self() {
   [ -n "$TS_BIN" ] || return
-  as_user "$TS_BIN" status --json 2>/dev/null | /usr/bin/jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//'
+  ts_status | /usr/bin/jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//'
 }
 
 # ----------------------------------------------------------------- setup ----
@@ -306,14 +310,30 @@ cmd_up() {
   echo "  other terminal:  ./macdroid.sh check      log: tail -f $LOG"
   echo "════════════════════════════════════════════════════════════════"
 
-  # 5) hold: supervise, self-heal the phone side on re-plug, report changes
-  local tick=0 last="" now phone_pid
+  # 5) hold: supervise, self-heal the phone side on re-plug, report changes.
+  #    Unplugging kills the `adb shell` session that runs the phone server. If
+  #    the phone is back on adb, restart the server; if it stays gone for
+  #    UNPLUG_GRACE seconds, turn off, so the Mac isn't left routing into a
+  #    dead tunnel and falls back to Wi-Fi if there is one. Wall-clock based,
+  #    because a health probe can block the loop for several seconds.
+  local tick=0 last="" now phone_pid gone_at=0 reason=""
   while kill -0 "$(cat "$STATE/mac.pid")" 2>/dev/null && kill -0 "$(cat "$STATE/dnshold.pid")" 2>/dev/null; do
     sleep 1; tick=$((tick+1))
     phone_pid=$(cat "$STATE/phone.pid" 2>/dev/null)
-    if ! pid_alive "$phone_pid" && phone_on; then
-      say "  $(date '+%H:%M:%S') ↪ phone server gone (re-plugged?) — restarting it"
-      push_phone >/dev/null 2>&1; start_phone_server
+    if ! pid_alive "$phone_pid"; then
+      if phone_on; then
+        [ "$gone_at" != 0 ] && say "  $(date '+%H:%M:%S') ↪ phone is back"
+        gone_at=0
+        say "  $(date '+%H:%M:%S') ↪ phone server gone (re-plugged?) — restarting it"
+        push_phone >/dev/null 2>&1; start_phone_server
+      elif [ "$gone_at" = 0 ]; then
+        gone_at=$(date +%s)
+        say "  $(date '+%H:%M:%S') 📵 phone disconnected — MacDroid turns off in ${UNPLUG_GRACE}s unless it's plugged back in"
+      elif [ $(( $(date +%s) - gone_at )) -ge "$UNPLUG_GRACE" ]; then
+        reason="phone unplugged for ${UNPLUG_GRACE}s"
+        break
+      fi
+      continue
     fi
     [ $((tick % HEALTH_IV)) = 0 ] || continue
     now=$(health_state)
@@ -322,8 +342,12 @@ cmd_up() {
       last="$now"
     fi
   done
-  say "⚠ sing-box or dnshold exited unexpectedly — tearing down"
-  sed 's/^/    /' "$STATE/mac.log" | tail -5
+  if [ -n "$reason" ]; then
+    say "⚪ turning MacDroid off — $reason"
+  else
+    say "⚠ sing-box or dnshold exited unexpectedly — tearing down"
+    sed 's/^/    /' "$STATE/mac.log" | tail -5
+  fi
 }
 
 health_state() {
