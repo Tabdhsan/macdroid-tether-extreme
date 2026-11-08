@@ -8,7 +8,7 @@
 // The DNS entry is a supplemental resolver with an empty match domain and a
 // low match order, which outranks every other resolver (Tailscale's included)
 // for all names. Search domains are passed through so short tailnet names
-// (`ssh cloudy`) still expand.
+// (`ssh my-server`) still expand.
 //
 // Usage: sudo dnshold <iface> <iface-ip> <dns-ip> [search-domain ...]
 

@@ -66,7 +66,7 @@ The carrier sees the phone's own connections on its normal data connection. One 
 The Mac's sing-box answers every DNS lookup itself:
 
 - **Public names** go over encrypted DNS (DoH) to `1.1.1.1`, through the phone.
-- **`*.ts.net` names** go to Tailscale's own resolver, `100.100.100.100`, so MagicDNS (`ssh cloudy`) keeps working. Tailscale's settings are never changed.
+- **`*.ts.net` names** go to Tailscale's own resolver, `100.100.100.100`, so MagicDNS (`ssh my-server`) keeps working. Tailscale's settings are never changed.
 
 A small helper, [`macdroid/dnshold.c`](macdroid/dnshold.c), makes this the Mac's first-choice resolver, ahead of Tailscale. It also marks MacDroid as macOS's **primary** connection. Without that, macOS thinks you're offline whenever Wi-Fi is off, and Chrome shows `ERR_INTERNET_DISCONNECTED` even though traffic would flow.
 
@@ -144,7 +144,7 @@ $ ./macdroid.sh check
   ✓ UDP         NTP round-trip 52ms (non-DNS UDP)
   ✓ primary     macOS sees utun225 as the main connection (Chrome etc. won't say offline)
   ✓ Tailscale   this Mac is online on the tailnet
-  ✓ MagicDNS    tabishs-macbook-pro.tail463fec.ts.net resolves
+  ✓ MagicDNS    my-mac.example-tailnet.ts.net resolves
 ```
 
 The key line is `exit … = phone's exit`. It means the Mac's public IP is the phone's mobile-data IP. `ping` isn't a valid test, because ICMP isn't carried. Use `check`.
