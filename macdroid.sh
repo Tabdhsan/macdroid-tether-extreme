@@ -13,6 +13,10 @@
 #   Mac apps ─▶ utun225 (sing-box tun) ─▶ SOCKS5 + UDP-over-TCP ─▶ adb forward
 #            ─▶ USB ─▶ phone: sing-box SOCKS server run by `adb shell` ─▶ cellular
 #
+# iPhone: same Mac side, but iOS has no `adb shell`. The phone server is the
+# sing-box MT app (App Store) running macdroid/iphone.json — the user starts it
+# on the phone — and the cable hop is usbmuxd via `iproxy` instead of adb forward.
+#
 # The phone-side server is an ordinary process on the phone opening its own
 # sockets — the same data path as any app — so it is not tethering. Unlike the
 # old tun2socks/Every Proxy setup, UDP is carried INSIDE the TCP pipe (UoT), so
@@ -45,6 +49,7 @@ SB_PHONE_LOCAL="$BIN/sing-box-android"
 DNSHOLD="$ASSETS/dnshold"
 MAC_CFG="$ASSETS/mac.json"
 PHONE_CFG="$ASSETS/phone.json"
+IPHONE_CFG="$ASSETS/iphone.json"   # imported into the sing-box MT app by hand
 
 PHONE_DIR=/data/local/tmp
 PHONE_BIN=$PHONE_DIR/macdroid-sb
@@ -70,6 +75,9 @@ HEALTH_IV=15
 UNPLUG_GRACE=15         # phone gone this long (seconds) → MacDroid turns itself off
 
 ADB_BIN="${MACDROID_ADB:-$(command -v adb 2>/dev/null || echo /opt/homebrew/bin/adb)}"
+IPROXY_BIN="${MACDROID_IPROXY:-$(command -v iproxy 2>/dev/null || echo /opt/homebrew/bin/iproxy)}"
+IDEVID_BIN="${MACDROID_IDEVICE_ID:-$(command -v idevice_id 2>/dev/null || echo /opt/homebrew/bin/idevice_id)}"
+IPHONE_HINT="open sing-box MT on the iPhone and tap Start (MacDroid profile)"
 TS_BIN="$(command -v tailscale 2>/dev/null)"
 for _t in /usr/local/bin/tailscale /Applications/Tailscale.app/Contents/MacOS/Tailscale; do
   [ -z "$TS_BIN" ] && [ -x "$_t" ] && TS_BIN=$_t
@@ -93,7 +101,20 @@ log()  { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*" >> "$LOG" 2>/dev/null; }
 say()  { echo "$*"; log "$*"; }
 die()  { echo "✗ $*" >&2; exit 1; }
 
-phone_on() { [ "$(adb get-state 2>/dev/null)" = device ]; }
+android_on() { [ "$(adb get-state 2>/dev/null)" = device ]; }
+# a trusted iPhone on USB (idevice_id -l lists USB devices only)
+iphone_on()  { [ -x "$IDEVID_BIN" ] && [ -n "$(as_user "$IDEVID_BIN" -l 2>/dev/null | head -n 1)" ]; }
+# which phone to use: android | iphone | (empty). Android wins if both are plugged in.
+detect_kind() { if android_on; then echo android; elif iphone_on; then echo iphone; fi; }
+# while up, stick to the kind we started with
+kind() { cat "$STATE/kind" 2>/dev/null || detect_kind; }
+phone_on() {
+  case "$(kind)" in
+    android) android_on ;;
+    iphone)  iphone_on ;;
+    *)       return 1 ;;
+  esac
+}
 
 # ---------------------------------------------------------------- probes ----
 
@@ -134,7 +155,8 @@ print(int((time.time()-t)*1000))' 2>/dev/null
 # which interface the phone itself uses for the internet: cell | wifi | none | ?
 p_phone_uplink() {
   local dev
-  phone_on || { echo "?"; return; }
+  [ "$(kind)" = iphone ] && { echo "unknown on iPhone — keep its Wi-Fi off"; return; }
+  android_on || { echo "?"; return; }
   dev=$(adb shell ip route get 1.1.1.1 2>/dev/null | tr -d '\r' | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')
   case "$dev" in
     "")                                 echo none ;;
@@ -184,8 +206,16 @@ cmd_setup() {
   "$SB_MAC" check -c "$PHONE_CFG" || die "phone.json failed validation"
   echo "✓ configs valid"
 
-  phone_on || die "no phone on adb — enable USB debugging, plug in, accept the prompt, re-run setup"
-  push_phone && echo "✓ phone ready ($PHONE_BIN)"
+  "$SB_MAC" check -c "$IPHONE_CFG" || die "iphone.json failed validation"
+  if android_on; then
+    push_phone && echo "✓ Android phone ready ($PHONE_BIN)"
+  elif iphone_on; then
+    [ -x "$IPROXY_BIN" ] || die "iPhone needs iproxy:  brew install libimobiledevice"
+    echo "✓ iPhone found. One-time on the phone: install sing-box MT from the App Store,"
+    echo "  import $IPHONE_CFG (AirDrop it), and start that profile."
+  else
+    die "no phone — Android: USB debugging on + accept the prompt; iPhone: plug in + Trust. Then re-run setup"
+  fi
   echo
   echo "next:  sudo ./macdroid.sh install    (once; then ./macdroid.sh toggle or Raycast — no sudo)"
 }
@@ -206,6 +236,13 @@ push_phone() {
 # -------------------------------------------------------------- up / down ---
 
 start_phone_server() {
+  if [ "$(kind)" = iphone ]; then
+    # the server is the sing-box MT app; only the cable hop is ours
+    pkill -f "iproxy $LOCAL_PORT:$PHONE_PORT" 2>/dev/null
+    as_user "$IPROXY_BIN" "$LOCAL_PORT:$PHONE_PORT" >> "$STATE/phone.log" 2>&1 &
+    echo $! > "$STATE/phone.pid"
+    return
+  fi
   adb shell "pkill -f '$PHONE_PAT'" >/dev/null 2>&1
   # `exec` so the server IS the shell session: if the cable, adb, or this
   # script goes away, the session closes and the server dies with it.
@@ -237,7 +274,8 @@ cleanup() {
   pkill -9 -f "$SB_MAC run" 2>/dev/null
   pkill -f "$DNSHOLD" 2>/dev/null
   pid=$(cat "$STATE/phone.pid" 2>/dev/null); [ -n "$pid" ] && kill "$pid" 2>/dev/null
-  if phone_on; then
+  pkill -f "iproxy $LOCAL_PORT:$PHONE_PORT" 2>/dev/null
+  if [ "$(kind)" = android ] && android_on; then
     adb shell "pkill -f '$PHONE_PAT'" >/dev/null 2>&1
     adb forward --remove "tcp:$LOCAL_PORT" >/dev/null 2>&1
   fi
@@ -252,25 +290,29 @@ cmd_up() {
   [ "$(id -u)" = 0 ] || die "needs root:  sudo ./macdroid.sh up"
   [ -x "$SB_MAC" ] && [ -x "$DNSHOLD" ] || die "not set up — run:  ./macdroid.sh setup"
   [ -d "$STATE" ] && pgrep -f "$SB_MAC run" >/dev/null && die "already running (or run: sudo ./macdroid.sh down)"
-  phone_on || die "no phone on adb — plug in + enable USB debugging"
+  local k; k=$(detect_kind)
+  [ -n "$k" ] || die "no phone — Android: plug in + USB debugging; iPhone: plug in + Trust"
+  [ "$k" = iphone ] && [ ! -x "$IPROXY_BIN" ] && die "iPhone needs iproxy:  brew install libimobiledevice"
   ifconfig "$TUN_DEV" >/dev/null 2>&1 && die "$TUN_DEV already exists — something else owns it (try: sudo ./macdroid.sh down)"
 
   rm -rf "$STATE"; mkdir -p "$STATE"
   # trap FIRST, before anything is changed, so Ctrl+C at any point is clean
   trap 'cleanup; exit 130' INT TERM HUP
   trap 'cleanup' EXIT
-  log "─── up $(date '+%Y-%m-%d') ───"
+  echo "$k" > "$STATE/kind"
+  log "─── up $(date '+%Y-%m-%d') ($k) ───"
 
   # 1) phone side
-  push_phone || exit 1
+  [ "$k" = android ] && { push_phone || exit 1; }
   start_phone_server
   if ! wait_phone_socks; then
-    echo "✗ phone server didn't answer. Its output:"; sed 's/^/    /' "$STATE/phone.log"
+    if [ "$k" = iphone ]; then echo "✗ iPhone found but sing-box isn't answering — $IPHONE_HINT"
+    else echo "✗ phone server didn't answer. Its output:"; sed 's/^/    /' "$STATE/phone.log"; fi
     exit 1
   fi
   local pip pup
   pip=$(p_phone_ip); pup=$(p_phone_uplink)
-  say "✓ phone server up — phone exit IP $pip, phone uplink: $pup"
+  say "✓ phone server up ($k) — phone exit IP $pip, phone uplink: $pup"
   [ "$pup" = wifi ] && echo "  ⚠ the PHONE is on Wi-Fi — turn the phone's Wi-Fi off to use its cellular data"
 
   # 2) Mac tun + routes
@@ -320,12 +362,16 @@ cmd_up() {
   while kill -0 "$(cat "$STATE/mac.pid")" 2>/dev/null && kill -0 "$(cat "$STATE/dnshold.pid")" 2>/dev/null; do
     sleep 1; tick=$((tick+1))
     phone_pid=$(cat "$STATE/phone.pid" 2>/dev/null)
-    if ! pid_alive "$phone_pid"; then
+    if ! pid_alive "$phone_pid" || { [ "$k" = iphone ] && ! iphone_on; }; then
       if phone_on; then
         [ "$gone_at" != 0 ] && say "  $(date '+%H:%M:%S') ↪ phone is back"
         gone_at=0
-        say "  $(date '+%H:%M:%S') ↪ phone server gone (re-plugged?) — restarting it"
-        push_phone >/dev/null 2>&1; start_phone_server
+        if [ "$k" = iphone ]; then
+          pid_alive "$phone_pid" || { say "  $(date '+%H:%M:%S') ↪ iproxy gone — restarting it"; start_phone_server; }
+        else
+          say "  $(date '+%H:%M:%S') ↪ phone server gone (re-plugged?) — restarting it"
+          push_phone >/dev/null 2>&1; start_phone_server
+        fi
       elif [ "$gone_at" = 0 ]; then
         gone_at=$(date +%s)
         say "  $(date '+%H:%M:%S') 📵 phone disconnected — MacDroid turns off in ${UNPLUG_GRACE}s unless it's plugged back in"
@@ -358,6 +404,12 @@ health_state() {
 }
 
 why_down() {
+  if [ "$(kind)" = iphone ]; then
+    iphone_on || { echo "iPhone not connected (cable? Trust this computer?)"; return; }
+    pid_alive "$(cat "$STATE/phone.pid" 2>/dev/null)" || { echo "iproxy not running"; return; }
+    [ -n "$(p_phone_ip)" ] || { echo "sing-box isn't answering on the iPhone — $IPHONE_HINT"; return; }
+    echo "iPhone is fine but traffic through $TUN_DEV isn't — see $STATE/mac.log"; return
+  fi
   phone_on || { echo "phone not on adb (cable? USB debugging?)"; return; }
   pid_alive "$(cat "$STATE/phone.pid" 2>/dev/null)" || { echo "phone server not running"; return; }
   [ -n "$(p_phone_ip)" ] || { echo "phone server running but has no internet (phone uplink: $(p_phone_uplink))"; return; }
@@ -433,7 +485,7 @@ cmd_install() {
   install -m 755 "$HERE/macdroid.sh" "$INSTALL_DIR/macdroid.sh"
   install -m 755 "$SB_MAC" "$SB_PHONE_LOCAL" "$INSTALL_DIR/bin/"
   install -m 755 "$DNSHOLD" "$INSTALL_DIR/macdroid/"
-  install -m 644 "$MAC_CFG" "$PHONE_CFG" "$INSTALL_DIR/macdroid/"
+  install -m 644 "$MAC_CFG" "$PHONE_CFG" "$IPHONE_CFG" "$INSTALL_DIR/macdroid/"
   chown -R root:wheel "$INSTALL_DIR"; chmod 755 "$INSTALL_DIR"
 
   cat > "$PLIST" <<EOF
@@ -448,6 +500,8 @@ cmd_install() {
   <dict>
     <key>MACDROID_USER</key><string>$SUDO_USER</string>
     <key>MACDROID_ADB</key><string>$ADB_BIN</string>
+    <key>MACDROID_IPROXY</key><string>$IPROXY_BIN</string>
+    <key>MACDROID_IDEVICE_ID</key><string>$IDEVID_BIN</string>
   </dict>
   <key>RunAtLoad</key><false/>
   <key>KeepAlive</key><false/>
@@ -506,7 +560,7 @@ status_line() {
 cmd_start() {
   [ -x "$INSTALL_DIR/macdroid.sh" ] || die "not installed — run:  sudo ./macdroid.sh install"
   if tun_up; then status_line; return 0; fi
-  phone_on || { echo "📵 Phone not on adb — plug in, USB debugging on"; return 1; }
+  [ -n "$(detect_kind)" ] || { echo "📵 No phone — Android: USB debugging on · iPhone: plug in + Trust"; return 1; }
   sudo -n /bin/launchctl kickstart "system/$LABEL" 2>/dev/null \
     || { echo "✗ couldn't start the job — re-run:  sudo ./macdroid.sh install"; return 1; }
   local i
@@ -547,7 +601,11 @@ cmd_check() {
   echo "── state ──"
   echo "  MacDroid on    : $running   (internet route via $(route_if 1.2.3.4); LAN via $(route_if 192.168.1.1))"
   echo "  resolver #1    : $(resolver1)"
-  if phone_on; then
+  if [ "$(kind)" = iphone ] && iphone_on; then
+    local sv="not checked (MacDroid off)"
+    [ "$running" = yes ] && { [ -n "$(p_phone_ip)" ] && sv=answering || sv="NOT answering — $IPHONE_HINT"; }
+    echo "  phone          : iPhone on USB, sing-box $sv"
+  elif phone_on; then
     echo "  phone          : on adb, uplink $(p_phone_uplink), server $([ -n "$(p_phone_ip)" ] && echo answering || echo 'not answering')"
   else
     echo "  phone          : NOT on adb"

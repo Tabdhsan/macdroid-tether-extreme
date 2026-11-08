@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MacDroid</title>
-<meta name="description" content="How macdroid.sh gives a Mac the phone's own mobile data over USB, without hotspot or tethering.">
+<meta name="description" content="How macdroid.sh gives a Mac an Android or iPhone's own mobile data over USB, without hotspot or tethering.">
 <style>
   :root {
     --ground: #eef0f3; --surface: #f8f9fb; --surface-2: #e6e9ee; --hairline: #d3d8e0;
@@ -95,14 +95,14 @@
 <div class="wrap">
   <p class="eyebrow">MacDroid · macdroid.sh</p>
   <h1>The phone's own data, on your Mac, over a cable</h1>
-  <p class="lede">Every app on the Mac uses the phone's <b>mobile data</b> through the USB cable. Hotspot and USB tethering aren't involved, so it isn't counted as hotspot. TCP and UDP both work, and it cleans up after itself even if something crashes.</p>
+  <p class="lede">Every app on the Mac uses the phone's <b>mobile data</b>, Android or iPhone, through the USB cable. Hotspot and USB tethering aren't involved, so it isn't counted as hotspot. TCP and UDP both work, and it cleans up after itself even if something crashes.</p>
 
   <section>
     <h2><span class="n">01</span>The path</h2>
     <p class="sub">One cable. Two copies of sing-box, one on each end. Everything leaves through the phone's own connection.</p>
     <div class="card diagram">
       <div class="svgwrap"><svg viewBox="0 0 860 250" role="img" aria-labelledby="dtitle">
-        <title id="dtitle">Mac apps go into utun225, through sing-box on the Mac, over adb and the USB cable to sing-box on the phone, then out through the phone's mobile data</title>
+        <title id="dtitle">Mac apps go into utun225, through sing-box on the Mac, over adb or iproxy and the USB cable to sing-box on the phone, then out through the phone's mobile data</title>
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="var(--teal)"/>
@@ -113,7 +113,7 @@
         <text x="24" y="46" class="mono" font-size="12" fill="var(--blue)" style="fill:var(--blue)">MAC</text>
         <!-- Phone zone -->
         <rect x="560" y="22" width="292" height="206" rx="14" fill="var(--amber-bg)" stroke="var(--amber)" stroke-opacity=".4"/>
-        <text x="576" y="46" class="mono" font-size="12" style="fill:var(--amber)">PHONE · no root</text>
+        <text x="576" y="46" class="mono" font-size="12" style="fill:var(--amber)">ANDROID or iPHONE · no root</text>
 
         <!-- boxes -->
         <g font-size="13">
@@ -131,11 +131,11 @@
 
           <rect x="580" y="70" width="120" height="64" rx="10" fill="var(--surface)" stroke="var(--hairline)"/>
           <text x="640" y="97" text-anchor="middle" font-weight="600">sing-box</text>
-          <text x="640" y="116" text-anchor="middle" class="faint" font-size="11">via adb shell</text>
+          <text x="640" y="116" text-anchor="middle" class="faint" font-size="11">adb shell · MT app</text>
 
           <rect x="724" y="70" width="112" height="64" rx="10" fill="var(--surface)" stroke="var(--amber)"/>
           <text x="780" y="97" text-anchor="middle" font-weight="600">Mobile data</text>
-          <text x="780" y="116" text-anchor="middle" class="faint" font-size="11">rmnet_data0</text>
+          <text x="780" y="116" text-anchor="middle" class="faint" font-size="11">cellular</text>
         </g>
 
         <!-- arrows -->
@@ -147,7 +147,7 @@
         </g>
         <!-- cable label -->
         <text x="499" y="88" text-anchor="middle" class="mono" font-size="11" style="fill:var(--teal)">USB cable</text>
-        <text x="499" y="124" text-anchor="middle" class="faint" font-size="11">adb forward · TCP</text>
+        <text x="499" y="124" text-anchor="middle" class="faint" font-size="11">adb or iproxy · TCP</text>
 
         <!-- annotations -->
         <g font-size="12" class="faint">
@@ -174,12 +174,12 @@
       <div class="card tile">
         <span class="tag amber">Not hotspot</span>
         <h3>The phone opens the connections</h3>
-        <p>Hotspot and tethering forward another device's packets. Here a normal process on the phone opens each connection itself, the same path any app uses. Android counts all of it as the phone's own use.</p>
+        <p>Hotspot and tethering forward another device's packets. Here a normal process on the phone opens each connection itself, the same path any app uses. Android counts all of it as the phone's own use. On iPhone the process is the sing-box MT app.</p>
       </div>
       <div class="card tile">
         <span class="tag teal">UDP works</span>
         <h3>UDP rides inside the TCP pipe</h3>
-        <p><code>adb forward</code> only carries TCP. UDP-over-TCP packs each UDP flow into it, so DNS, QUIC, NTP, calls and WireGuard all get through, not just web pages.</p>
+        <p><code>adb forward</code> and <code>iproxy</code> only carry TCP. UDP-over-TCP packs each UDP flow into it, so DNS, QUIC, NTP, calls and WireGuard all get through, not just web pages.</p>
       </div>
       <div class="card tile">
         <span class="tag blue">Wi-Fi optional</span>
@@ -191,7 +191,7 @@
 
   <section>
     <h2><span class="n">03</span>Proof it isn't tethering</h2>
-    <p class="sub">Read straight from the phone with <code>adb shell dumpsys</code> during a session.</p>
+    <p class="sub">Read straight from an Android phone with <code>adb shell dumpsys</code> during a session. iOS has no equivalent readout.</p>
     <div class="card scroll">
       <table>
         <thead><tr><th>Check on the phone</th><th>Result</th></tr></thead>
@@ -209,12 +209,13 @@
 
   <section>
     <h2><span class="n">04</span>How we got here</h2>
-    <p class="sub">Two earlier designs, both removed and both still in git history.</p>
+    <p class="sub">Two earlier designs, both removed and both still in git history, then iPhone support.</p>
     <div class="card">
       <ol class="timeline">
         <li><span class="dot bad">1</span><div><b>Userspace RNDIS driver</b><span>Made Android USB tethering work on Apple Silicon. It worked, but tethering <i>is</i> the hotspot meter.</span></div></li>
         <li><span class="dot bad">2</span><div><b>Every Proxy + tun2socks</b><span>Used the phone's on-device path, but the adb pipe is TCP-only. DNS and all other UDP failed as soon as Wi-Fi went off.</span></div></li>
-        <li><span class="dot ok">3</span><div><b>sing-box on both ends (now)</b><span>UDP inside TCP, DNS answered locally, macOS told it's the primary connection. Nothing is installed on the phone and no root is needed.</span></div></li>
+        <li><span class="dot ok">3</span><div><b>sing-box on both ends</b><span>UDP inside TCP, DNS answered locally, macOS told it's the primary connection. Nothing is installed on the phone and no root is needed.</span></div></li>
+        <li><span class="dot ok">4</span><div><b>iPhone too</b><span>Same Mac side. The phone server is the sing-box MT app from the App Store, and <code>iproxy</code> (usbmuxd) replaces <code>adb forward</code>. No jailbreak.</span></div></li>
       </ol>
     </div>
   </section>
@@ -228,7 +229,8 @@
         <tbody>
           <tr><td>Routes</td><td><code>utun225</code></td><td>sing-box exits (the kernel deletes them)</td></tr>
           <tr><td>DNS + primary connection</td><td>temporary macOS setting</td><td><code>dnshold</code> exits (macOS deletes it)</td></tr>
-          <tr><td>Phone server</td><td><code>adb shell</code> session</td><td>the session or cable goes away</td></tr>
+          <tr><td>Phone server (Android)</td><td><code>adb shell</code> session</td><td>the session or cable goes away</td></tr>
+          <tr><td>Cable hop (iPhone)</td><td><code>iproxy</code></td><td>MacDroid turns off. The sing-box MT app runs until you tap Stop.</td></tr>
           <tr><td>Tailscale settings</td><td colspan="2">never touched</td></tr>
         </tbody>
       </table>
@@ -246,9 +248,26 @@ sudo ./macdroid.sh install     <span class="c"># launchd job + passwordless star
 ./macdroid.sh toggle           <span class="c"># or Raycast: "MacDroid Toggle"</span>
 ./macdroid.sh status           <span class="c"># 📱 MacDroid ON · 140ms · exit 172.56.x.x</span>
 ./macdroid.sh check            <span class="c"># exit IP, DNS, UDP, primary, MagicDNS</span></pre>
+    <div class="grid3" style="margin-top:14px">
+      <div class="card tile">
+        <span class="tag amber">iPhone, once</span>
+        <h3>Set up the app</h3>
+        <p>Trust this Mac, install <b>sing-box MT</b> from the App Store, AirDrop <code>macdroid/iphone.json</code> to it and name the profile MacDroid.</p>
+      </div>
+      <div class="card tile">
+        <span class="tag teal">Turn on</span>
+        <h3>Plug in, then toggle</h3>
+        <p>Phone Wi-Fi off. On iPhone, tap Start in sing-box MT. Then MacDroid Toggle in Raycast. The Mac's Wi-Fi can stay on.</p>
+      </div>
+      <div class="card tile">
+        <span class="tag blue">Back to normal</span>
+        <h3>Toggle, then tidy the phone</h3>
+        <p>MacDroid Toggle (or unplug: it turns off after 15s). Phone Wi-Fi back on. On iPhone, tap Stop in sing-box MT to free the VPN slot for Tailscale.</p>
+      </div>
+    </div>
   </section>
 
-  <footer>macdroid.sh · sing-box 1.14.3 on both ends · tested on Galaxy Z Flip6, Android 16, T-Mobile</footer>
+  <footer>macdroid.sh · sing-box 1.14.3 on both ends · tested on Galaxy Z Flip6 (Android 16) and iPhone (iOS 27.2), T-Mobile</footer>
 </div>
 </body>
 </html>
