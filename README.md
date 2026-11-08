@@ -70,6 +70,8 @@ The Mac's sing-box answers every DNS lookup itself:
 
 A small helper, [`macdroid/dnshold.c`](macdroid/dnshold.c), makes this the Mac's first-choice resolver, ahead of Tailscale. It also marks MacDroid as macOS's **primary** connection. Without that, macOS thinks you're offline whenever Wi-Fi is off, and Chrome shows `ERR_INTERNET_DISCONNECTED` even though traffic would flow.
 
+**Tailscale with the Mac's Wi-Fi off.** On macOS, Tailscale ignores every `utun` interface when it decides whether there's a network at all, and MacDroid's tunnel is `utun225`. With Wi-Fi off it would say "Network Down" and the tailnet would stop working. So while MacDroid is on, it also creates `feth225`, a placeholder interface with a dead-end address (`198.18.225.1`). Tailscale counts that as a network and comes back online. Its traffic still goes through `utun225` and the phone; nothing is sent over the placeholder.
+
 DNS answers are IPv4 only. All IPv6 traffic is still routed into the tunnel, so none of it leaks around the phone.
 
 ### Routing
@@ -121,7 +123,7 @@ Re-run `sudo ./macdroid.sh install` after changing anything in this repo. `sudo 
 | `./macdroid.sh toggle` | no | On if off, off if on |
 | `./macdroid.sh start` / `stop` | no | Explicit on / off. `start` waits until it's verified. |
 | `./macdroid.sh status` | no | One line: `📱 MacDroid ON · 140ms · exit 172.56.x.x` or `⚪ OFF` |
-| `./macdroid.sh check` | no | Full diagnosis: exit IP matches the phone's, DNS, real UDP, primary connection, MagicDNS |
+| `./macdroid.sh check` | no | Full diagnosis: exit IP matches the phone's, DNS, real UDP, primary connection, Tailscale online, MagicDNS |
 | `sudo ./macdroid.sh up` | yes | Foreground mode for debugging. That window is the switch, and Ctrl+C turns it off. |
 | `sudo ./macdroid.sh down` | yes | Force teardown from any terminal |
 
@@ -141,6 +143,7 @@ $ ./macdroid.sh check
   ✓ DNS         names resolve (resolver #1: 172.19.0.2)
   ✓ UDP         NTP round-trip 52ms (non-DNS UDP)
   ✓ primary     macOS sees utun225 as the main connection (Chrome etc. won't say offline)
+  ✓ Tailscale   this Mac is online on the tailnet
   ✓ MagicDNS    tabishs-macbook-pro.tail463fec.ts.net resolves
 ```
 
@@ -154,6 +157,7 @@ Nothing outlives the processes that own it:
 - **DNS** is a *temporary* macOS setting held by `dnshold`. macOS deletes it when `dnshold` exits, even on `kill -9`.
 - **The phone server** runs inside an `adb shell` session and dies with it. On iPhone, MacDroid only owns `iproxy`, which it stops; the sing-box MT app keeps running until you tap Stop, and on its own it only listens on the phone's localhost.
 - **Tailscale** settings are never touched.
+- **The `feth225` placeholder** is the one thing not owned by a process. Teardown removes it, and so does the next start if a crash left it behind. Left over, it's harmless: one address and no routes.
 
 A reboot is never needed to recover.
 
@@ -173,6 +177,7 @@ Logs: `/tmp/macdroid.log` for events, and `/tmp/macdroid.out` for the launchd jo
 | Exit IP is the phone's but slow | That's the phone's own signal and plan. The USB link moves over 2 Gbit/s and isn't the bottleneck. |
 | `up` warns the phone is on Wi-Fi | Turn the phone's Wi-Fi off, or you'll be using that Wi-Fi rather than mobile data. |
 | An app says offline | Run `./macdroid.sh check` and look at the `primary` line. |
+| Tailscale says "Network Down" with Wi-Fi off | Run `./macdroid.sh check` and look at the `Tailscale` line. `ifconfig feth225` should show `198.18.225.1`; if not, toggle MacDroid off and on. |
 | Anything stuck | `sudo ./macdroid.sh down`. Even a crash cleans up after itself (see above). |
 
 ## Layout

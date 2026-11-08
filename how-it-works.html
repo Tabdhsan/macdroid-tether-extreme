@@ -222,7 +222,7 @@
 
   <section>
     <h2><span class="n">05</span>Nothing outlives it</h2>
-    <p class="sub">Every change belongs to a process, and goes away with it, even after a crash or <code>kill -9</code>.</p>
+    <p class="sub">Every change belongs to a process, and goes away with it, even after a crash or <code>kill -9</code>. The one exception is a harmless placeholder interface, cleaned up on the next start.</p>
     <div class="card scroll">
       <table>
         <thead><tr><th>Change</th><th>Owned by</th><th>Removed when</th></tr></thead>
@@ -231,6 +231,7 @@
           <tr><td>DNS + primary connection</td><td>temporary macOS setting</td><td><code>dnshold</code> exits (macOS deletes it)</td></tr>
           <tr><td>Phone server (Android)</td><td><code>adb shell</code> session</td><td>the session or cable goes away</td></tr>
           <tr><td>Cable hop (iPhone)</td><td><code>iproxy</code></td><td>MacDroid turns off. The sing-box MT app runs until you tap Stop.</td></tr>
+          <tr><td><code>feth225</code> placeholder, so Tailscale sees a network with Wi-Fi off</td><td>MacDroid</td><td>teardown, or the next start after a crash (harmless if left)</td></tr>
           <tr><td>Tailscale settings</td><td colspan="2">never touched</td></tr>
         </tbody>
       </table>
@@ -247,7 +248,7 @@ sudo ./macdroid.sh install     <span class="c"># launchd job + passwordless star
 <span class="c"># day to day — no sudo</span>
 ./macdroid.sh toggle           <span class="c"># or Raycast: "MacDroid Toggle"</span>
 ./macdroid.sh status           <span class="c"># 📱 MacDroid ON · 140ms · exit 172.56.x.x</span>
-./macdroid.sh check            <span class="c"># exit IP, DNS, UDP, primary, MagicDNS</span></pre>
+./macdroid.sh check            <span class="c"># exit IP, DNS, UDP, primary, Tailscale, MagicDNS</span></pre>
     <div class="grid3" style="margin-top:14px">
       <div class="card tile">
         <span class="tag amber">iPhone, once</span>

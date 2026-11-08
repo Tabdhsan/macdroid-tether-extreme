@@ -28,6 +28,9 @@
 #     deletes it when dnshold exits, even on kill -9
 #   • the phone server is a child of an `adb shell` session; it dies with it
 #   • Tailscale settings are never touched
+#   • the one exception is the feth225 placeholder (see TS_PLACEHOLDER): it isn't
+#     owned by a process, so teardown and the next `up` remove it; left behind
+#     it's harmless (one address, no routes)
 # A reboot is never needed to recover. `down` exists only for convenience.
 
 set -u
@@ -60,6 +63,13 @@ LOCAL_PORT=8901          # mac.json phone outbound server_port
 TUN_DEV=utun225          # mac.json interface_name
 TUN_IP=172.19.0.1
 TUN_DNS=172.19.0.2       # hijacked by sing-box (next address after TUN_IP)
+# Tailscale on macOS ignores every utun* interface when deciding whether there's
+# a network (netmon isInterestingInterface). With Wi-Fi off, utun225 is the only
+# way out, so Tailscale says "network down" and the tailnet stops working. A
+# placeholder interface with a dead-end address makes it count the network as
+# up; its traffic still follows the routes into utun225. Nothing is sent over it.
+TS_PLACEHOLDER=feth225
+TS_PLACEHOLDER_IP=198.18.225.1   # benchmark range: never a real LAN, routes nowhere
 
 STATE=/tmp/macdroid
 LOG=/tmp/macdroid.log
@@ -260,6 +270,12 @@ wait_phone_socks() {
   return 1
 }
 
+placeholder_up() {
+  ifconfig "$TS_PLACEHOLDER" destroy 2>/dev/null
+  ifconfig "$TS_PLACEHOLDER" create 2>/dev/null &&
+    ifconfig "$TS_PLACEHOLDER" inet "$TS_PLACEHOLDER_IP" netmask 255.255.255.255 up 2>/dev/null
+}
+
 cleanup() {
   trap - INT TERM HUP EXIT
   local pid
@@ -273,6 +289,7 @@ cleanup() {
   done
   pkill -9 -f "$SB_MAC run" 2>/dev/null
   pkill -f "$DNSHOLD" 2>/dev/null
+  ifconfig "$TS_PLACEHOLDER" destroy 2>/dev/null
   pid=$(cat "$STATE/phone.pid" 2>/dev/null); [ -n "$pid" ] && kill "$pid" 2>/dev/null
   pkill -f "iproxy $LOCAL_PORT:$PHONE_PORT" 2>/dev/null
   if [ "$(kind)" = android ] && android_on; then
@@ -326,6 +343,7 @@ cmd_up() {
   done
   ifconfig "$TUN_DEV" >/dev/null 2>&1 || { echo "✗ $TUN_DEV never appeared"; exit 1; }
   say "✓ $TUN_DEV up — internet routes now via the phone (LAN + tailnet stay direct)"
+  placeholder_up && say "✓ $TS_PLACEHOLDER placeholder up — Tailscale sees a network even with Wi-Fi off"
 
   # 3) DNS — first-choice resolver for as long as dnshold lives
   local suffix; suffix=$(tailnet_suffix)
@@ -432,10 +450,19 @@ verify_line() {
   if [ "$prim" = "$TUN_DEV" ]; then echo "  ✓ primary     macOS sees $TUN_DEV as the main connection (Chrome etc. won't say offline)"
   elif ifconfig "$TUN_DEV" >/dev/null 2>&1; then echo "  ✗ primary     macOS main connection is '${prim:-none}', not $TUN_DEV — apps may claim offline"; ok=0
   fi
-  local self; self=$(tailnet_self)
-  if [ -n "$self" ]; then
-    if dscacheutil -q host -a name "$self" 2>/dev/null | grep -q ip_address; then echo "  ✓ MagicDNS    $self resolves"
-    else echo "  ✗ MagicDNS    $self does not resolve"; ok=0; fi
+  if [ -n "$TS_BIN" ]; then
+    local ts online health self
+    ts=$(ts_status)
+    online=$(printf '%s' "$ts" | /usr/bin/jq -r '.Self.Online // false' 2>/dev/null)
+    health=$(printf '%s' "$ts" | /usr/bin/jq -r '(.Health // [])[0] // empty' 2>/dev/null)
+    self=$(printf '%s' "$ts" | /usr/bin/jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//')
+    if [ -z "$ts" ]; then echo "  ✗ Tailscale   no answer from tailscale status"; ok=0
+    elif [ "$online" = true ] && [ -z "$health" ]; then echo "  ✓ Tailscale   this Mac is online on the tailnet"
+    else echo "  ✗ Tailscale   offline${health:+ — $health}"; ok=0; fi
+    if [ -n "$self" ]; then
+      if dscacheutil -q host -a name "$self" 2>/dev/null | grep -q ip_address; then echo "  ✓ MagicDNS    $self resolves"
+      else echo "  ✗ MagicDNS    $self does not resolve"; ok=0; fi
+    fi
   fi
   [ "$ok" = 1 ]
 }
